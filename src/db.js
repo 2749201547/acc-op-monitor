@@ -1,16 +1,13 @@
-import Database from 'better-sqlite3';
-import fs from 'fs';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { getDataDir } from './paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, '..', 'data');
+const dataDir = getDataDir();
 const profilesDir = path.join(dataDir, 'profiles');
 
-fs.mkdirSync(profilesDir, { recursive: true });
-
-const db = new Database(path.join(dataDir, 'app.db'));
-db.pragma('journal_mode = WAL');
+const db = new DatabaseSync(path.join(dataDir, 'app.db'));
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS accounts (

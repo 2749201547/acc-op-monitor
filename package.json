@@ -3,18 +3,85 @@
   "version": "1.0.0",
   "description": "Local TikTok multi-account inbox for personal use",
   "private": true,
+  "author": "TikTokchat",
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
-    "start": "node src/server.js",
-    "setup": "npx playwright install chromium"
+    "start": "node scripts/launch.mjs",
+    "serve": "node src/server.js",
+    "setup": "npx playwright install chromium",
+    "electron": "electron .",
+    "dist": "node scripts/prepare-dist.mjs"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
     "express": "^4.21.2",
     "playwright": "^1.50.1",
     "uuid": "^11.0.5"
   },
+  "devDependencies": {
+    "electron": "^37.7.0",
+    "electron-builder": "^26.0.12"
+  },
   "allowScripts": {
-    "better-sqlite3@11.10.0": true
+    "better-sqlite3@11.10.0": true,
+    "electron@37.10.3": true,
+    "electron-winstaller@5.4.0": true
+  },
+  "build": {
+    "appId": "local.tiktokchat.app",
+    "productName": "TikTokchat",
+    "copyright": "Personal use",
+    "asar": true,
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-stage/app-server",
+        "to": "app-server"
+      },
+      {
+        "from": "dist-stage/runtime",
+        "to": "runtime"
+      },
+      {
+        "from": "dist-stage/pw-browsers",
+        "to": "pw-browsers"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TikTokchat",
+      "artifactName": "TikTokchat-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "TikTokchat-Portable-${version}.exe"
+    }
   }
 }

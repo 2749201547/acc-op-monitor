@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import path from 'path';
 import { profilePath } from '../db.js';
 
 /** @type {Map<string, import('playwright').BrowserContext>} */
@@ -7,6 +8,35 @@ const contexts = new Map();
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+function findChrome() {
+  const fromEnv = process.env.CHROME_PATH;
+  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  const candidates = [
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ].filter(Boolean);
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+async function launchPersistent(dir, headless) {
+  const base = {
+    headless,
+    viewport: { width: 1280, height: 800 },
+    userAgent: USER_AGENT,
+    locale: 'zh-CN',
+    args: ['--disable-blink-features=AutomationControlled'],
+  };
+  if (findChrome()) {
+    try {
+      return await chromium.launchPersistentContext(dir, { ...base, channel: 'chrome' });
+    } catch {
+      /* fall through to bundled Chromium */
+    }
+  }
+  return chromium.launchPersistentContext(dir, base);
+}
 
 export async function getContext(accountId, { headless = true } = {}) {
   if (contexts.has(accountId)) {
@@ -16,13 +46,7 @@ export async function getContext(accountId, { headless = true } = {}) {
   const dir = profilePath(accountId);
   fs.mkdirSync(dir, { recursive: true });
 
-  const context = await chromium.launchPersistentContext(dir, {
-    headless,
-    viewport: { width: 1280, height: 800 },
-    userAgent: USER_AGENT,
-    locale: 'zh-CN',
-    args: ['--disable-blink-features=AutomationControlled'],
-  });
+  const context = await launchPersistent(dir, headless);
 
   contexts.set(accountId, context);
   context.on('close', () => contexts.delete(accountId));

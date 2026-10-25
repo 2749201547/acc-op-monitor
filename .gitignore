@@ -33,3 +33,10 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# Packaged app
+dist/
+dist-stage/
+pw-browsers/
+tools/
+build/icon.png

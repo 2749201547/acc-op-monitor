@@ -1,11 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { getContext, closeAll, readProfile } from '../src/browser/manager.js';
 import { cacheAvatar } from '../src/browser/avatars.js';
 import { avatarsDir } from '../src/browser/avatars.js';
 
-const db = new Database('data/app.db');
+const db = new DatabaseSync('data/app.db');
 const a = db.prepare('select id, username, display_name, avatar_url from accounts').get();
 if (!a) {
   console.log('no account');

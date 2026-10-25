@@ -1,10 +1,9 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { getDataDir } from '../paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const avatarsDir = path.join(__dirname, '..', '..', 'data', 'avatars');
+export const avatarsDir = path.join(getDataDir(), 'avatars');
 fs.mkdirSync(avatarsDir, { recursive: true });
 
 /** Pull first usable image URL from TikTok-style nested avatar objects. */
