@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TikTokchat</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <header class="brand">
+          <img class="brand-logo" src="/logo.svg" alt="TikTokchat" />
+          <p>本机多账号收件箱</p>
+        </header>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>账号</h2>
+            <button id="btnAddAccount" class="btn btn-primary" type="button">添加</button>
+          </div>
+          <ul id="accountList" class="account-list"></ul>
+        </section>
+
+        <section class="panel actions">
+          <button id="btnSyncAll" class="btn btn-block" type="button">同步全部消息</button>
+          <p id="syncHint" class="hint"></p>
+        </section>
+      </aside>
+
+      <main class="main">
+        <section class="inbox">
+          <header class="inbox-head">
+            <h2>统一收件箱</h2>
+            <select id="accountFilter">
+              <option value="">全部账号</option>
+            </select>
+          </header>
+          <ul id="conversationList" class="conversation-list"></ul>
+        </section>
+
+        <section class="chat">
+          <header id="chatHead" class="chat-head">
+            <div id="chatAvatar" class="avatar avatar-lg" hidden></div>
+            <div>
+              <h2 id="chatTitle">选择会话</h2>
+              <p id="chatSub" class="muted"></p>
+            </div>
+          </header>
+          <div id="messageList" class="message-list"></div>
+          <form id="replyForm" class="reply-form" hidden>
+            <textarea id="replyInput" rows="2" placeholder="输入回复…" required></textarea>
+            <button class="btn btn-primary" type="submit">发送</button>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="loginDialog">
+      <form method="dialog" class="dialog-card">
+        <h3>扫码登录</h3>
+        <p id="loginStatusText" class="muted">请使用 TikTok App 扫描弹出的浏览器窗口</p>
+        <div class="qr-wrap">
+          <div id="qrPlaceholder" class="qr-placeholder">浏览器启动后会弹出扫码窗口</div>
+          <img id="qrImage" alt="登录二维码" hidden />
+        </div>
+        <div class="dialog-actions">
+          <button id="btnCancelLogin" class="btn" value="cancel" type="submit">取消</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

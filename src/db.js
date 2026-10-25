@@ -1,0 +1,66 @@
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dataDir = path.join(__dirname, '..', 'data');
+const profilesDir = path.join(dataDir, 'profiles');
+
+fs.mkdirSync(profilesDir, { recursive: true });
+
+const db = new Database(path.join(dataDir, 'app.db'));
+db.pragma('journal_mode = WAL');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    username TEXT,
+    display_name TEXT,
+    avatar_url TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    peer_id TEXT NOT NULL,
+    peer_username TEXT,
+    peer_nickname TEXT,
+    peer_avatar TEXT,
+    last_message TEXT,
+    last_message_at TEXT,
+    unread INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    UNIQUE(account_id, peer_id),
+    FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    peer_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    content TEXT NOT NULL,
+    message_type TEXT NOT NULL DEFAULT 'text',
+    sent_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(account_id, id),
+    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, sent_at);
+`);
+
+export function profilePath(accountId) {
+  return path.join(profilesDir, accountId);
+}
+
+export default db;
