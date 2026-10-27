@@ -6,7 +6,7 @@ import { getContext, closeContext, isLoggedIn, readProfile } from './manager.js'
  *   message: string,
  *   screenshot: string|null,
  *   profile: object|null,
- *   page?: import('playwright').Page,
+ *   page?: import('playwright-core').Page,
  *   startedAt: number,
  *   promise?: Promise<void>,
  * }} LoginSession

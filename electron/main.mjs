@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
 
-app.setName('TikTokchat');
+app.setName('AOM');
+app.setAppUserModelId('local.aom.app');
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -24,15 +25,11 @@ function packagedPaths() {
   if (app.isPackaged) {
     return {
       serverRoot: path.join(process.resourcesPath, 'app-server'),
-      nodeBin: path.join(process.resourcesPath, 'runtime', 'node.exe'),
-      browsers: path.join(process.resourcesPath, 'pw-browsers'),
       dataDir: path.join(app.getPath('userData'), 'data'),
     };
   }
   return {
     serverRoot: projectRoot,
-    nodeBin: process.execPath.includes('electron') ? 'node' : process.execPath,
-    browsers: process.env.PLAYWRIGHT_BROWSERS_PATH || '',
     dataDir: path.join(projectRoot, 'data'),
   };
 }
@@ -64,15 +61,16 @@ async function waitForHealth(timeoutMs = 30000) {
 }
 
 function startBackend() {
-  const { serverRoot, nodeBin, browsers, dataDir } = packagedPaths();
+  const { serverRoot, dataDir } = packagedPaths();
   const env = {
     ...process.env,
     PORT: process.env.PORT || '3788',
     TTC_DATA_DIR: dataDir,
+    ELECTRON_RUN_AS_NODE: '1',
   };
-  if (browsers) env.PLAYWRIGHT_BROWSERS_PATH = browsers;
+  delete env.PLAYWRIGHT_BROWSERS_PATH;
 
-  serverProcess = spawn(nodeBin, [path.join(serverRoot, 'src', 'server.js')], {
+  serverProcess = spawn(process.execPath, [path.join(serverRoot, 'src', 'server.js')], {
     cwd: serverRoot,
     env,
     stdio: 'inherit',
@@ -108,7 +106,8 @@ function createWindow(port) {
     height: 860,
     minWidth: 960,
     minHeight: 640,
-    title: 'TikTokchat',
+    title: 'AOM',
+    icon: path.join(projectRoot, 'build', 'icon.ico'),
     autoHideMenuBar: true,
     backgroundColor: '#111111',
     webPreferences: {

@@ -1,26 +1,16 @@
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 import fs from 'fs';
-import path from 'path';
 import { profilePath } from '../db.js';
+import { requireSystemBrowser } from './system-browser.js';
 
-/** @type {Map<string, import('playwright').BrowserContext>} */
+/** @type {Map<string, import('playwright-core').BrowserContext>} */
 const contexts = new Map();
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
-function findChrome() {
-  const fromEnv = process.env.CHROME_PATH;
-  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
-  const candidates = [
-    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  ].filter(Boolean);
-  return candidates.find((p) => fs.existsSync(p)) || null;
-}
-
 async function launchPersistent(dir, headless) {
+  const browser = requireSystemBrowser();
   const base = {
     headless,
     viewport: { width: 1280, height: 800 },
@@ -28,14 +18,14 @@ async function launchPersistent(dir, headless) {
     locale: 'zh-CN',
     args: ['--disable-blink-features=AutomationControlled'],
   };
-  if (findChrome()) {
-    try {
-      return await chromium.launchPersistentContext(dir, { ...base, channel: 'chrome' });
-    } catch {
-      /* fall through to bundled Chromium */
-    }
+  try {
+    return await chromium.launchPersistentContext(dir, { ...base, channel: browser.channel });
+  } catch {
+    return chromium.launchPersistentContext(dir, {
+      ...base,
+      executablePath: browser.executablePath,
+    });
   }
-  return chromium.launchPersistentContext(dir, base);
 }
 
 export async function getContext(accountId, { headless = true } = {}) {

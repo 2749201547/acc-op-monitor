@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findSystemBrowser } from '../src/browser/system-browser.js';
 
 const projectRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 3788);
@@ -24,19 +25,9 @@ function run(cmd, args) {
 function hasJsDeps() {
   return (
     existsSync(path.join(projectRoot, 'node_modules', 'express')) &&
-    existsSync(path.join(projectRoot, 'node_modules', 'playwright'))
+    (existsSync(path.join(projectRoot, 'node_modules', 'playwright-core')) ||
+      existsSync(path.join(projectRoot, 'node_modules', 'playwright')))
   );
-}
-
-function findChrome() {
-  const fromEnv = process.env.CHROME_PATH;
-  if (fromEnv && existsSync(fromEnv)) return fromEnv;
-  const candidates = [
-    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  ].filter(Boolean);
-  return candidates.find((p) => existsSync(p)) || null;
 }
 
 async function ensureDeps() {
@@ -51,31 +42,37 @@ async function ensureDeps() {
     run(npmCmd, ['install']);
   }
 
-  if (findChrome()) return;
-
-  const { chromium } = await import('playwright');
-  const bundled = chromium.executablePath();
-  if (existsSync(bundled)) return;
-
-  console.log('未找到本机 Chrome，正在安装内置浏览器（只需这一次）…');
-  run(npmCmd, ['run', 'setup']);
+  if (!findSystemBrowser()) {
+    console.error('未找到 Chrome 或 Edge。登录需要其中之一，请先安装后再打开。');
+    process.exit(1);
+  }
 }
 
 function waitForHealth(timeoutMs = 20000) {
   const started = Date.now();
+  const ports = Array.from({ length: 21 }, (_, i) => PORT + i);
   return new Promise((resolve) => {
     const ping = () => {
-      const req = http.get(`http://127.0.0.1:${PORT}/api/health`, (res) => {
-        res.resume();
-        resolve(res.statusCode === 200);
-      });
-      req.on('error', () => {
-        if (Date.now() - started > timeoutMs) {
-          resolve(false);
+      const tryPort = (index) => {
+        if (index >= ports.length) {
+          if (Date.now() - started > timeoutMs) {
+            resolve(false);
+            return;
+          }
+          setTimeout(ping, 300);
           return;
         }
-        setTimeout(ping, 300);
-      });
+        const req = http.get(`http://127.0.0.1:${ports[index]}/api/health`, (res) => {
+          res.resume();
+          resolve(res.statusCode === 200);
+        });
+        req.on('error', () => tryPort(index + 1));
+        req.setTimeout(400, () => {
+          req.destroy();
+          tryPort(index + 1);
+        });
+      };
+      tryPort(0);
     };
     ping();
   });

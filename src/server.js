@@ -114,7 +114,7 @@ app.post('/api/conversations/:id/reply', async (req, res) => {
 export function startServer(port = PORT) {
   return new Promise((resolve, reject) => {
     const server = app.listen(port, '127.0.0.1', () => {
-      console.log(`TikTokchat 已启动: http://127.0.0.1:${port}`);
+      console.log(`AOM 已启动: http://127.0.0.1:${port}`);
       resolve({ server, port });
     });
     server.on('error', (err) => {
