@@ -1,22 +1,83 @@
 import { chromium } from 'playwright-core';
 import fs from 'fs';
+import path from 'path';
 import { profilePath } from '../db.js';
 import { requireSystemBrowser } from './system-browser.js';
+import { getPlatform, normalizePlatform } from './platforms/index.js';
 
 /** @type {Map<string, import('playwright-core').BrowserContext>} */
 const contexts = new Map();
+/** @type {Map<string, boolean>} */
+const contextHeadless = new Map();
+/** @type {Map<string, { x: number, y: number, width: number, height: number }>} */
+const contextWindowBounds = new Map();
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
-async function launchPersistent(dir, headless) {
+/**
+ * @param {{ x?: number, y?: number, width?: number, height?: number } | null | undefined} b
+ */
+function normalizeWindowBounds(b) {
+  if (!b) return null;
+  const x = Math.round(Number(b.x));
+  const y = Math.round(Number(b.y));
+  const width = Math.round(Number(b.width));
+  const height = Math.round(Number(b.height));
+  if (![x, y, width, height].every((n) => Number.isFinite(n))) return null;
+  if (width < 200 || height < 160) return null;
+  return { x, y, width, height };
+}
+
+/** Avoid “要恢复页面吗” and last-session window size overriding our place. */
+function markProfileCleanExit(dir) {
+  const prefsPath = path.join(dir, 'Default', 'Preferences');
+  try {
+    if (!fs.existsSync(prefsPath)) return;
+    const prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+    prefs.profile = prefs.profile || {};
+    prefs.profile.exit_type = 'Normal';
+    prefs.profile.exited_cleanly = true;
+    if (prefs.session) {
+      delete prefs.session;
+    }
+    // Forget last window placement so the next launch doesn't restore a taller frame
+    if (prefs.browser?.window_placement) {
+      delete prefs.browser.window_placement;
+    }
+    fs.writeFileSync(prefsPath, JSON.stringify(prefs));
+  } catch (e) {
+    console.warn('[aom] markProfileCleanExit failed:', e?.message || e);
+  }
+}
+
+async function launchPersistent(dir, headless, windowBounds) {
   const browser = requireSystemBrowser();
+  const bounds = normalizeWindowBounds(windowBounds);
+  if (!headless) {
+    markProfileCleanExit(dir);
+  }
+  const args = [
+    '--disable-blink-features=AutomationControlled',
+    '--disable-infobars',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--hide-crash-restore-bubble',
+    '--disable-session-crashed-bubble',
+    '--disable-features=TranslateUI,ChromeWhatsNewUI',
+  ];
+  if (!headless && bounds) {
+    // Only position at launch. Do NOT pass --window-size: Chromium treats it as
+    // content size, so outer frame becomes taller than our slot (esp. 2nd+ profiles).
+    args.push(`--window-position=${bounds.x},${bounds.y}`);
+  }
   const base = {
     headless,
-    viewport: { width: 1280, height: 800 },
+    // null = viewport follows real window; avoids setViewportSize stretching the frame
+    viewport: bounds ? null : { width: 1400, height: 900 },
     userAgent: USER_AGENT,
     locale: 'zh-CN',
-    args: ['--disable-blink-features=AutomationControlled'],
+    args,
   };
   try {
     return await chromium.launchPersistentContext(dir, { ...base, channel: browser.channel });
@@ -28,19 +89,124 @@ async function launchPersistent(dir, headless) {
   }
 }
 
-export async function getContext(accountId, { headless = true } = {}) {
+/**
+ * Move the headed Chrome window to the given screen DIP rect (CDP coordinates).
+ * Retries because session restore / first paint often fights the first setWindowBounds.
+ * @param {import('playwright-core').BrowserContext} context
+ * @param {{ x: number, y: number, width: number, height: number } | null | undefined} windowBounds
+ */
+export async function placeContextWindow(context, windowBounds) {
+  const bounds = normalizeWindowBounds(windowBounds);
+  if (!bounds || !context) return false;
+
+  let lastErr = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const page = context.pages()[0] || (await context.newPage());
+      const session = await context.newCDPSession(page);
+      let windowId;
+      try {
+        const info = await session.send('Target.getTargetInfo');
+        const targetId = info?.targetInfo?.targetId;
+        const win = await session.send(
+          'Browser.getWindowForTarget',
+          targetId ? { targetId } : {}
+        );
+        windowId = win.windowId;
+      } catch {
+        const win = await session.send('Browser.getWindowForTarget');
+        windowId = win.windowId;
+      }
+      await session.send('Browser.setWindowBounds', {
+        windowId,
+        bounds: {
+          left: bounds.x,
+          top: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          windowState: 'normal',
+        },
+      });
+      // Verify position AND size (height used to be ignored → later windows “grew” downward)
+      const cur = await session.send('Browser.getWindowBounds', { windowId });
+      const b = cur?.bounds;
+      if (
+        b &&
+        Math.abs((b.left ?? 0) - bounds.x) < 40 &&
+        Math.abs((b.top ?? 0) - bounds.y) < 40 &&
+        Math.abs((b.width ?? 0) - bounds.width) < 48 &&
+        Math.abs((b.height ?? 0) - bounds.height) < 48
+      ) {
+        return true;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+    await new Promise((r) => setTimeout(r, 80 + attempt * 40));
+  }
+  console.warn(
+    '[aom] placeContextWindow failed:',
+    lastErr?.message || lastErr,
+    bounds
+  );
+  return false;
+}
+
+export async function getContext(accountId, { headless = true, windowBounds = null } = {}) {
+  const bounds = normalizeWindowBounds(windowBounds);
+  if (!headless && !bounds) {
+    console.warn(
+      '[aom] headed browser without windowBounds — Chrome will open as a free window. Restart Electron so preload (window.aom) is available.'
+    );
+  }
+
   if (contexts.has(accountId)) {
-    return contexts.get(accountId);
+    const prev = contextHeadless.get(accountId);
+    // Facebook 需要有界面；若模式不一致则重建
+    if (prev === headless) {
+      const ctx = contexts.get(accountId);
+      if (!headless && bounds) {
+        contextWindowBounds.set(accountId, bounds);
+        await placeContextWindow(ctx, bounds);
+      }
+      return ctx;
+    }
+    await closeContext(accountId);
   }
 
   const dir = profilePath(accountId);
   fs.mkdirSync(dir, { recursive: true });
 
-  const context = await launchPersistent(dir, headless);
+  const context = await launchPersistent(dir, headless, bounds);
 
   contexts.set(accountId, context);
-  context.on('close', () => contexts.delete(accountId));
+  contextHeadless.set(accountId, headless);
+  if (bounds) contextWindowBounds.set(accountId, bounds);
+  context.on('close', () => {
+    contexts.delete(accountId);
+    contextHeadless.delete(accountId);
+    contextWindowBounds.delete(accountId);
+  });
+
+  if (!headless && bounds) {
+    await placeContextWindow(context, bounds);
+    // Session restore / crash bubble can re-layout a moment later
+    setTimeout(() => {
+      const b = contextWindowBounds.get(accountId);
+      if (b && contexts.get(accountId) === context) {
+        placeContextWindow(context, b).catch(() => {});
+      }
+    }, 400);
+  }
   return context;
+}
+
+/** Re-apply last known embed bounds (e.g. after navigation). */
+export async function reapplyContextWindow(accountId) {
+  const ctx = contexts.get(accountId);
+  const bounds = contextWindowBounds.get(accountId);
+  if (!ctx || !bounds) return false;
+  return placeContextWindow(ctx, bounds);
 }
 
 export async function closeContext(accountId) {
@@ -48,6 +214,8 @@ export async function closeContext(accountId) {
   if (ctx) {
     await ctx.close().catch(() => {});
     contexts.delete(accountId);
+    contextHeadless.delete(accountId);
+    contextWindowBounds.delete(accountId);
   }
 }
 
@@ -56,124 +224,12 @@ export async function closeAll() {
   await Promise.all(ids.map((id) => closeContext(id)));
 }
 
-export async function isLoggedIn(context) {
-  const cookies = await context.cookies('https://www.tiktok.com');
-  return cookies.some((c) => c.name === 'sessionid' || c.name === 'sessionid_ss');
+export async function isLoggedIn(context, platform = 'tiktok') {
+  return getPlatform(platform).isLoggedIn(context);
 }
 
-function pickAvatarField(user) {
-  if (!user) return null;
-  const candidates = [
-    user.avatarThumb,
-    user.avatarMedium,
-    user.avatarLarger,
-    user.avatar_thumb,
-    user.avatar_medium,
-    user.avatar_larger,
-    user.avatarUrl,
-    user.avatar_url,
-    user.avatar,
-  ];
-  for (const c of candidates) {
-    if (!c) continue;
-    if (typeof c === 'string' && c.startsWith('http')) return c;
-    if (Array.isArray(c.url_list) && c.url_list[0]) return c.url_list[0];
-    if (typeof c.url === 'string') return c.url;
-  }
-  return null;
+export async function readProfile(context, platform = 'tiktok', opts = {}) {
+  return getPlatform(platform).readProfile(context, opts);
 }
 
-export async function readProfile(context) {
-  const page = context.pages()[0] || (await context.newPage());
-  if (!page.url().includes('tiktok.com')) {
-    await page.goto('https://www.tiktok.com/foryou', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
-  }
-  await page.waitForTimeout(1500);
-
-  let info = await page.evaluate(() => {
-    const next = document.querySelector('#__UNIVERSAL_DATA_FOR_REHYDRATION__');
-    const out = { username: null, displayName: null, avatarUrl: null, rawUser: null };
-    if (next?.textContent) {
-      try {
-        const data = JSON.parse(next.textContent);
-        const scope = data?.__DEFAULT_SCOPE__ || {};
-        const user =
-          scope['webapp.app-context']?.user ||
-          scope['webapp.user-detail']?.userInfo?.user ||
-          scope['webapp.app-context']?.userInfo?.user;
-        if (user) out.rawUser = user;
-      } catch {
-        /* ignore */
-      }
-    }
-
-    const img =
-      document.querySelector('[data-e2e="profile-icon"] img') ||
-      document.querySelector('img[class*="Avatar"]') ||
-      document.querySelector('span[shape="circle"] img') ||
-      document.querySelector('a[href*="/@"] img');
-    out.avatarUrl = img?.currentSrc || img?.src || null;
-
-    const links = [...document.querySelectorAll('a[href*="/@"]')];
-    for (const a of links) {
-      const m = a.getAttribute('href')?.match(/\/@([\w.-]+)/);
-      if (m) {
-        out.username = m[1];
-        out.displayName = m[1];
-        break;
-      }
-    }
-    return out;
-  });
-
-  if (info.rawUser) {
-    info = {
-      username: info.rawUser.uniqueId || info.rawUser.unique_id || info.username,
-      displayName: info.rawUser.nickname || info.displayName,
-      avatarUrl: pickAvatarField(info.rawUser) || info.avatarUrl,
-    };
-  } else {
-    info = {
-      username: info.username,
-      displayName: info.displayName,
-      avatarUrl: info.avatarUrl,
-    };
-  }
-
-  // Still missing username → open profile shortcut if present
-  if (!info.username || !info.avatarUrl) {
-    const profileHref = await page
-      .locator('a[href^="/@"]')
-      .first()
-      .getAttribute('href')
-      .catch(() => null);
-    if (profileHref && profileHref.startsWith('/@')) {
-      await page.goto(`https://www.tiktok.com${profileHref}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000,
-      });
-      await page.waitForTimeout(1500);
-      const more = await page.evaluate(() => {
-        const next = document.querySelector('#__UNIVERSAL_DATA_FOR_REHYDRATION__');
-        try {
-          const data = JSON.parse(next?.textContent || '{}');
-          const user =
-            data?.__DEFAULT_SCOPE__?.['webapp.user-detail']?.userInfo?.user;
-          return user || null;
-        } catch {
-          return null;
-        }
-      });
-      if (more) {
-        info.username = more.uniqueId || more.unique_id || info.username;
-        info.displayName = more.nickname || info.displayName;
-        info.avatarUrl = pickAvatarField(more) || info.avatarUrl;
-      }
-    }
-  }
-
-  return info;
-}
+export { normalizePlatform, getPlatform };

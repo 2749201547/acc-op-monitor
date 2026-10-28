@@ -13,6 +13,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     label TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'tiktok',
     username TEXT,
     display_name TEXT,
     avatar_url TEXT,
@@ -55,6 +56,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, sent_at);
 `);
+
+// 旧库补 platform 列
+try {
+  const cols = db.prepare('PRAGMA table_info(accounts)').all();
+  if (!cols.some((c) => c.name === 'platform')) {
+    db.exec(`ALTER TABLE accounts ADD COLUMN platform TEXT NOT NULL DEFAULT 'tiktok'`);
+  }
+} catch {
+  /* ignore */
+}
 
 export function profilePath(accountId) {
   return path.join(profilesDir, accountId);

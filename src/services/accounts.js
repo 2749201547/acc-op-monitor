@@ -2,40 +2,37 @@ import { v4 as uuid } from 'uuid';
 import db, { profilePath } from '../db.js';
 import { startQrLogin, getLoginStatus, cancelLogin } from '../browser/login.js';
 import { closeContext } from '../browser/manager.js';
+import { normalizePlatform, PLATFORMS } from '../browser/platforms/index.js';
 import fs from 'fs';
 
 function now() {
   return new Date().toISOString();
 }
 
-export function listAccounts() {
-  return db
-    .prepare(
-      `SELECT id, label, username, display_name as displayName, avatar_url as avatarUrl,
+const ACCOUNT_SELECT = `SELECT id, label, platform, username, display_name as displayName, avatar_url as avatarUrl,
               status, last_sync_at as lastSyncAt, created_at as createdAt, updated_at as updatedAt
-       FROM accounts ORDER BY created_at DESC`
-    )
-    .all();
+       FROM accounts`;
+
+export function listAccounts() {
+  return db.prepare(`${ACCOUNT_SELECT} ORDER BY created_at DESC`).all();
 }
 
-export function createAccount(label) {
+export function createAccount(label, platform) {
   const id = uuid();
   const t = now();
+  const p = normalizePlatform(platform);
+  if (!PLATFORMS.includes(p)) {
+    throw new Error('不支持的平台');
+  }
   db.prepare(
-    `INSERT INTO accounts (id, label, status, created_at, updated_at)
-     VALUES (?, ?, 'pending', ?, ?)`
-  ).run(id, label || '未命名账号', t, t);
+    `INSERT INTO accounts (id, label, platform, status, created_at, updated_at)
+     VALUES (?, ?, ?, 'pending', ?, ?)`
+  ).run(id, label || '未命名账号', p, t, t);
   return getAccount(id);
 }
 
 export function getAccount(id) {
-  return db
-    .prepare(
-      `SELECT id, label, username, display_name as displayName, avatar_url as avatarUrl,
-              status, last_sync_at as lastSyncAt, created_at as createdAt, updated_at as updatedAt
-       FROM accounts WHERE id = ?`
-    )
-    .get(id);
+  return db.prepare(`${ACCOUNT_SELECT} WHERE id = ?`).get(id);
 }
 
 export function updateAccount(id, fields) {
@@ -48,19 +45,19 @@ export function updateAccount(id, fields) {
   const status = fields.status !== undefined ? fields.status : a.status;
   const lastSyncAt = fields.lastSyncAt !== undefined ? fields.lastSyncAt : a.lastSyncAt;
   const label = fields.label !== undefined ? fields.label : a.label;
+  const platform = fields.platform !== undefined ? normalizePlatform(fields.platform) : a.platform;
   db.prepare(
-    `UPDATE accounts SET label=?, username=?, display_name=?, avatar_url=?, status=?,
+    `UPDATE accounts SET label=?, platform=?, username=?, display_name=?, avatar_url=?, status=?,
      last_sync_at=?, updated_at=? WHERE id=?`
-  ).run(label, username, displayName, avatarUrl, status, lastSyncAt, now(), id);
+  ).run(label, platform, username, displayName, avatarUrl, status, lastSyncAt, now(), id);
   return getAccount(id);
 }
 
-export function beginLogin(accountId) {
+export function beginLogin(accountId, windowBounds = null) {
   const a = getAccount(accountId);
   if (!a) throw new Error('账号不存在');
   updateAccount(accountId, { status: 'logging_in' });
-  // 立刻返回，浏览器在后台启动，避免管理台卡住
-  return startQrLogin(accountId);
+  return startQrLogin(accountId, a.platform, windowBounds);
 }
 
 export async function pollLogin(accountId) {
@@ -68,12 +65,16 @@ export async function pollLogin(accountId) {
   if (!a) throw new Error('账号不存在');
   const result = await getLoginStatus(accountId);
   if (result.status === 'logged_in') {
-    updateAccount(accountId, {
+    const patch = {
       status: 'active',
       username: result.profile?.username,
       displayName: result.profile?.displayName,
-      avatarUrl: result.profile?.avatarUrl,
-    });
+    };
+    // 登录快路径常拿不到头像；不要用 null 把已有头像覆盖掉
+    if (result.profile?.avatarUrl) {
+      patch.avatarUrl = result.profile.avatarUrl;
+    }
+    updateAccount(accountId, patch);
   } else if (result.status === 'expired' || result.status === 'error') {
     updateAccount(accountId, { status: result.status === 'error' ? 'pending' : 'expired' });
   }

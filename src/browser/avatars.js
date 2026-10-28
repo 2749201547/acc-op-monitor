@@ -71,11 +71,16 @@ export async function cacheAvatar(context, remoteUrl, key) {
   const filePath = path.join(avatarsDir, filename);
   const localUrl = `/media/avatars/${filename}`;
 
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 100) {
-    return localUrl;
+  const MIN_AVATAR_BYTES = 2500;
+
+  if (fs.existsSync(filePath)) {
+    const size = fs.statSync(filePath).size;
+    if (size >= MIN_AVATAR_BYTES) return localUrl;
+    // 过小多半是 Logo，删掉重抓
+    fs.unlinkSync(filePath);
   }
 
-  // Open image URL in a tab — TikTok CDN often blocks plain request/fetch
+  // Open image URL in a tab — TikTok/FB CDN often blocks plain request/fetch
   try {
     const page = await context.newPage();
     try {
@@ -83,11 +88,24 @@ export async function cacheAvatar(context, remoteUrl, key) {
         waitUntil: 'load',
         timeout: 20000,
       });
-      if (res && res.ok()) {
+      if (res && (res.ok() || res.status() === 301 || res.status() === 302)) {
         const buf = Buffer.from(await res.body());
-        if (buf.length > 50) {
+        const ct = (res.headers()['content-type'] || '').toLowerCase();
+        const looksImage =
+          ct.includes('image') || buf[0] === 0xff || buf[0] === 0x89 || buf[0] === 0x52;
+        if (looksImage && buf.length >= MIN_AVATAR_BYTES) {
           fs.writeFileSync(filePath, buf);
           return localUrl;
+        }
+      }
+      // 页面上已是 <img> 时截图兜底
+      const img = page.locator('img').first();
+      if (await img.isVisible({ timeout: 1500 }).catch(() => false)) {
+        const shot = await img.screenshot({ type: 'jpeg', quality: 85 });
+        if (shot.length >= MIN_AVATAR_BYTES) {
+          const jpgPath = filePath.replace(/\.\w+$/, '.jpg');
+          fs.writeFileSync(jpgPath, shot);
+          return `/media/avatars/${path.basename(jpgPath)}`;
         }
       }
     } finally {
@@ -97,7 +115,7 @@ export async function cacheAvatar(context, remoteUrl, key) {
     /* keep remote */
   }
 
-  return remoteUrl;
+  return null;
 }
 
 /** Screenshot an avatar <img> on the page and save locally (most reliable). */
@@ -111,15 +129,23 @@ export async function cacheAvatarFromLocator(page, locator, key) {
   const filePath = path.join(avatarsDir, filename);
   const localUrl = `/media/avatars/${filename}`;
 
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 100) {
-    return localUrl;
+  if (fs.existsSync(filePath)) {
+    const size = fs.statSync(filePath).size;
+    // 超小文件多半是 Logo 图标，删掉重抓
+    if (size >= 2500) return localUrl;
+    fs.unlinkSync(filePath);
   }
 
   try {
     const el = locator.first();
     if (!(await el.isVisible({ timeout: 2000 }).catch(() => false))) return null;
+    const src = await el.getAttribute('src').catch(() => '');
+    if (src && /rsrc\.php|static\.xx\.fbcdn|messenger_icon|ic_messenger/i.test(src)) {
+      return null;
+    }
     const buf = await el.screenshot({ type: 'jpeg', quality: 85 });
-    if (buf.length > 50) {
+    // 过小基本是图标，不要当头像缓存
+    if (buf.length > 2500) {
       fs.writeFileSync(filePath, buf);
       return localUrl;
     }

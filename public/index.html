@@ -9,67 +9,210 @@
   </head>
   <body>
     <div class="app">
-      <aside class="sidebar">
+      <!-- 第一列：平台 + 分组 -->
+      <aside class="col col-groups">
         <header class="brand">
-          <img class="brand-logo" src="/logo.png" alt="AOM" />
-          <p>本机多账号收件箱</p>
+          <div class="brand-hex" aria-label="AOM">
+            <svg
+              class="brand-sync-ring"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                fill="#2F7BFF"
+                d="M5.46257 4.43262C7.21556 2.91688 9.5007 2 12 2C17.5228 2 22 6.47715 22 12C22 14.1361 21.3302 16.1158 20.1892 17.7406L17 12H20C20 7.58172 16.4183 4 12 4C9.84982 4 7.89777 4.84827 6.46023 6.22842L5.46257 4.43262Z"
+              />
+              <path
+                fill="#1EC8B0"
+                d="M18.5374 19.5674C16.7844 21.0831 14.4993 22 12 22C6.47715 22 2 17.5228 2 12C2 9.86386 2.66979 7.88416 3.8108 6.25944L7 12H4C4 16.4183 7.58172 20 12 20C14.1502 20 16.1022 19.1517 17.5398 17.7716L18.5374 19.5674Z"
+              />
+            </svg>
+            <button
+              type="button"
+              class="brand-logo-btn"
+              id="btnBrandSync"
+              aria-label="同步全部消息"
+              title="同步全部消息"
+            >
+              <img class="brand-logo" src="/logo.png" alt="" />
+            </button>
+            <button
+              type="button"
+              class="brand-add"
+              id="btnBrandAdd"
+              aria-label="添加账号"
+              title="添加账号"
+              hidden
+            >
+              <svg class="brand-add-svg" viewBox="0 0 512 512" aria-hidden="true" focusable="false">
+                <defs>
+                  <linearGradient id="aomAddOuter" x1="56" y1="256" x2="456" y2="256" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#2F7BFF" />
+                    <stop offset="1" stop-color="#1EC8B0" />
+                  </linearGradient>
+                  <linearGradient id="aomAddInner" x1="56" y1="256" x2="456" y2="256" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#1EC8B0" />
+                    <stop offset="1" stop-color="#2F7BFF" />
+                  </linearGradient>
+                </defs>
+                <path
+                  fill="url(#aomAddOuter)"
+                  fill-rule="evenodd"
+                  d="M256 56c110.5 0 200 89.5 200 200s-89.5 200-200 200S56 366.5 56 256 145.5 56 256 56zm0 52c-81.7 0-148 66.3-148 148s66.3 148 148 148 148-66.3 148-148-66.3-148-148-148z"
+                />
+                <path
+                  fill="url(#aomAddInner)"
+                  d="M351.604 234.755h-63.736c-5.867 0-10.623-4.756-10.623-10.623v-63.736c0-11.714-9.531-21.245-21.245-21.245s-21.245 9.531-21.245 21.245v63.736c0 5.867-4.756 10.623-10.623 10.623h-63.736c-11.714 0-21.245 9.531-21.245 21.245s9.531 21.245 21.245 21.245h63.736c5.867 0 10.623 4.756 10.623 10.623v63.736c0 11.714 9.531 21.245 21.245 21.245s21.245-9.531 21.245-21.245v-63.736c0-5.867 4.756-10.623 10.623-10.623h63.736c11.714 0 21.245-9.531 21.245-21.245s-9.531-21.245-21.245-21.245z"
+                />
+              </svg>
+            </button>
+            <button type="button" class="hex-icon" style="--i: 0" data-platform="youtube" aria-label="筛选 YouTube" title="YouTube">
+              <img src="/icons/youtube.svg" alt="" />
+            </button>
+            <button type="button" class="hex-icon" style="--i: 1" data-platform="tiktok" aria-label="筛选 TikTok" title="TikTok">
+              <img src="/icons/tiktok.svg" alt="" />
+            </button>
+            <button type="button" class="hex-icon" style="--i: 2" data-platform="instagram" aria-label="筛选 Instagram" title="Instagram">
+              <img src="/icons/instagram.svg" alt="" />
+            </button>
+            <button type="button" class="hex-icon" style="--i: 3" data-platform="threads" aria-label="筛选 Threads" title="Threads">
+              <img src="/icons/threads.svg" alt="" />
+            </button>
+            <button type="button" class="hex-icon" style="--i: 4" data-platform="pinterest" aria-label="筛选 Pinterest" title="Pinterest">
+              <img src="/icons/pinterest.svg" alt="" />
+            </button>
+            <button type="button" class="hex-icon" style="--i: 5" data-platform="facebook" aria-label="筛选 Facebook" title="Facebook">
+              <img src="/icons/facebook.svg" alt="" />
+            </button>
+          </div>
         </header>
 
-        <section class="panel">
+        <section class="panel panel-fill">
           <div class="panel-head">
-            <h2>账号</h2>
-            <button id="btnAddAccount" class="btn btn-primary" type="button">添加</button>
+            <h2>分组</h2>
           </div>
-          <ul id="accountList" class="account-list"></ul>
-        </section>
-
-        <section class="panel actions">
-          <button id="btnSyncAll" class="btn btn-block" type="button">同步全部消息</button>
-          <p id="syncHint" class="hint"></p>
+          <ul id="groupList" class="group-list autohide-scroll"></ul>
         </section>
       </aside>
 
-      <main class="main">
-        <section class="inbox">
-          <header class="inbox-head">
-            <h2>统一收件箱</h2>
-            <select id="accountFilter">
-              <option value="">全部账号</option>
-            </select>
-          </header>
-          <ul id="conversationList" class="conversation-list"></ul>
+      <!-- 第二列：账号 -->
+      <aside class="col col-accounts">
+        <section class="panel panel-fill">
+          <div class="panel-head">
+            <h2>账号</h2>
+            <button
+              type="button"
+              class="icon-btn"
+              id="btnAccountsSync"
+              aria-label="同步消息"
+              title="同步消息"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path
+                  d="M12 4C14.5905 4 16.8939 5.23053 18.3573 7.14274L16 9.5H22V3.5L19.7814 5.71863C17.9494 3.452 15.1444 2 12 2 6.47715 2 2 6.47715 2 12H4C4 7.58172 7.58172 4 12 4ZM20 12C20 16.4183 16.4183 20 12 20 9.40951 20 7.10605 18.7695 5.64274 16.8573L8 14.5 2 14.5V20.5L4.21863 18.2814C6.05062 20.548 8.85557 22 12 22 17.5228 22 22 17.5228 22 12H20Z"
+                ></path>
+              </svg>
+            </button>
+          </div>
+          <ul id="accountList" class="account-list autohide-scroll"></ul>
         </section>
+        <p id="syncHint" class="hint sync-hint"></p>
+      </aside>
 
-        <section class="chat">
-          <header id="chatHead" class="chat-head">
-            <div id="chatAvatar" class="avatar avatar-lg" hidden></div>
-            <div>
-              <h2 id="chatTitle">选择会话</h2>
-              <p id="chatSub" class="muted"></p>
-            </div>
+      <!-- 第三列：消息（会话列表） -->
+      <section class="col col-inbox inbox">
+        <header class="inbox-head">
+          <h2>消息</h2>
+        </header>
+        <ul id="conversationList" class="conversation-list autohide-scroll"></ul>
+      </section>
+
+      <!-- 聊天详情 -->
+      <section class="col col-chat chat">
+        <header id="chatHead" class="chat-head">
+          <div id="chatAvatar" class="avatar avatar-lg" hidden></div>
+          <div>
+            <h2 id="chatTitle">选择会话</h2>
+            <p id="chatSub" class="muted"></p>
+          </div>
+        </header>
+        <div id="messageList" class="message-list autohide-scroll"></div>
+        <form id="replyForm" class="reply-form" hidden>
+          <textarea id="replyInput" rows="2" placeholder="输入回复…" required></textarea>
+          <button class="btn btn-primary" type="submit">发送</button>
+        </form>
+        <!-- 同步时遮住会话区（无黑屏遮罩），Chrome 贴合下方槽位 -->
+        <div id="syncEmbedOverlay" class="sync-embed-overlay" hidden>
+          <header class="sync-embed-head">
+            <h2 id="syncEmbedTitle">正在同步</h2>
+            <p id="syncEmbedStatus" class="muted"></p>
           </header>
-          <div id="messageList" class="message-list"></div>
-          <form id="replyForm" class="reply-form" hidden>
-            <textarea id="replyInput" rows="2" placeholder="输入回复…" required></textarea>
-            <button class="btn btn-primary" type="submit">发送</button>
-          </form>
-        </section>
-      </main>
+          <div class="browser-embed-slot sync-embed-slot" id="syncEmbedSlot">
+            <div class="qr-placeholder">浏览器将贴合此区域</div>
+          </div>
+        </div>
+      </section>
     </div>
 
+    <dialog id="groupDialog">
+      <form method="dialog" class="dialog-card" id="groupForm">
+        <h3>选择分组</h3>
+        <p id="groupDialogHint" class="muted">把账号归到分组，方便管理</p>
+        <div id="groupChips" class="group-chips"></div>
+        <label class="field">
+          <span>分组名称</span>
+          <input
+            id="groupInput"
+            name="group"
+            type="text"
+            maxlength="40"
+            placeholder="如：客服号 / 主号 / 店铺号"
+            autocomplete="off"
+          />
+        </label>
+        <div class="dialog-actions dialog-actions-split">
+          <button class="btn" id="btnCancelGroup" type="button">取消</button>
+          <button class="btn btn-primary" id="btnConfirmGroup" value="confirm" type="submit">
+            确定
+          </button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="loginDialog">
-      <form method="dialog" class="dialog-card">
-        <h3>扫码登录</h3>
+      <form method="dialog" class="dialog-card dialog-card-embed">
+        <h3 id="loginDialogTitle">扫码登录</h3>
         <p id="loginStatusText" class="muted">请使用 TikTok App 扫描弹出的浏览器窗口</p>
-        <div class="qr-wrap">
+        <div class="browser-embed-slot qr-wrap" id="loginEmbedSlot">
           <div id="qrPlaceholder" class="qr-placeholder">浏览器启动后会弹出扫码窗口</div>
-          <img id="qrImage" alt="登录二维码" hidden />
+          <img id="qrImage" alt="登录预览" hidden />
         </div>
         <div class="dialog-actions">
           <button id="btnCancelLogin" class="btn" value="cancel" type="submit">取消</button>
         </div>
       </form>
     </dialog>
+
+    <dialog id="confirmDialog">
+      <form method="dialog" class="dialog-card">
+        <h3 id="confirmDialogTitle">确认删除</h3>
+        <p id="confirmDialogMessage" class="muted">确定删除该账号及其本地会话？</p>
+        <div class="dialog-actions dialog-actions-split">
+          <button class="btn" id="btnCancelConfirm" value="cancel" type="submit">取消</button>
+          <button class="btn btn-primary" id="btnOkConfirm" value="confirm" type="submit">确定</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="accountContextMenu" class="context-menu" hidden role="menu">
+      <button type="button" class="context-menu-item" data-ctx="login" role="menuitem">登录</button>
+      <button type="button" class="context-menu-item" data-ctx="move" role="menuitem">切换分组</button>
+      <button type="button" class="context-menu-item context-menu-danger" data-ctx="delete" role="menuitem">
+        删除
+      </button>
+    </div>
 
     <script src="/app.js" type="module"></script>
   </body>

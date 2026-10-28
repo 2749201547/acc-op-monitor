@@ -30,32 +30,48 @@ const NAV_NAMES = [
   'Explore',
   'Profile',
   'Messages',
+  '忘记密码?',
+  '忘记密码',
+  '隐私政策',
+  'Messenger',
+  'Facebook',
+  'Meta',
+  'Notifications',
+  'Notification',
+  '通知',
 ];
 
 function purgeNoiseConversations(accountId) {
   const rows = db
     .prepare(
       accountId
-        ? 'SELECT id, peer_nickname, peer_username, last_message FROM conversations WHERE account_id = ?'
-        : 'SELECT id, peer_nickname, peer_username, last_message FROM conversations'
+        ? `SELECT c.id, c.peer_id, c.peer_nickname, c.peer_username, c.last_message, a.platform
+           FROM conversations c JOIN accounts a ON a.id = c.account_id WHERE c.account_id = ?`
+        : `SELECT c.id, c.peer_id, c.peer_nickname, c.peer_username, c.last_message, a.platform
+           FROM conversations c JOIN accounts a ON a.id = c.account_id`
     )
     .all(...(accountId ? [accountId] : []));
 
   const delMsg = db.prepare('DELETE FROM messages WHERE conversation_id = ?');
   const delConv = db.prepare('DELETE FROM conversations WHERE id = ?');
   for (const row of rows) {
-    if (
-      isNoiseConversation({
-        peerNickname: row.peer_nickname,
-        peerUsername: row.peer_username,
-        lastMessage: row.last_message,
-      }) ||
+    const noise =
+      isNoiseConversation(
+        {
+          peerId: row.peer_id,
+          peerNickname: row.peer_nickname,
+          peerUsername: row.peer_username,
+          lastMessage: row.last_message,
+        },
+        row.platform
+      ) ||
+      String(row.peer_id || '').startsWith('dom_') ||
       NAV_NAMES.some(
         (n) =>
           n.toLowerCase() === String(row.peer_nickname || '').toLowerCase() ||
           n.toLowerCase() === String(row.peer_username || '').toLowerCase()
-      )
-    ) {
+      );
+    if (noise) {
       delMsg.run(row.id);
       delConv.run(row.id);
     }
@@ -78,7 +94,7 @@ export function listConversations(accountId) {
     sql += ' WHERE c.account_id = ?';
     params.push(accountId);
   }
-  sql += ' ORDER BY c.updated_at DESC';
+  sql += ' ORDER BY COALESCE(c.last_message_at, c.updated_at) DESC';
   return db.prepare(sql).all(...params);
 }
 
@@ -100,6 +116,7 @@ function upsertConversation(accountId, c) {
     .get(accountId, c.peerId);
   const id = existing?.id || uuid();
   const t = now();
+  const lastAt = c.lastMessageAt || null;
   db.prepare(
     `INSERT INTO conversations
       (id, account_id, peer_id, peer_username, peer_nickname, peer_avatar,
@@ -108,11 +125,17 @@ function upsertConversation(accountId, c) {
      ON CONFLICT(account_id, peer_id) DO UPDATE SET
        peer_username=excluded.peer_username,
        peer_nickname=excluded.peer_nickname,
-       peer_avatar=COALESCE(excluded.peer_avatar, conversations.peer_avatar),
-       last_message=excluded.last_message,
-       last_message_at=excluded.last_message_at,
+       peer_avatar=CASE
+         WHEN excluded.peer_avatar IS NOT NULL AND excluded.peer_avatar != '' THEN excluded.peer_avatar
+         ELSE conversations.peer_avatar
+       END,
+       last_message=CASE
+         WHEN excluded.last_message IS NOT NULL AND excluded.last_message != '' THEN excluded.last_message
+         ELSE conversations.last_message
+       END,
+       last_message_at=COALESCE(excluded.last_message_at, conversations.last_message_at),
        unread=excluded.unread,
-       updated_at=excluded.updated_at`
+       updated_at=COALESCE(excluded.last_message_at, conversations.updated_at, excluded.updated_at)`
   ).run(
     id,
     accountId,
@@ -121,9 +144,9 @@ function upsertConversation(accountId, c) {
     c.peerNickname,
     c.peerAvatar,
     c.lastMessage || '',
-    c.lastMessageAt || t,
+    lastAt,
     c.unread || 0,
-    c.lastMessageAt || t
+    lastAt || t
   );
   return id;
 }
@@ -148,21 +171,150 @@ function upsertMessage(accountId, conversationId, m) {
   );
 }
 
-export async function syncOne(accountId) {
+function previewMessageId(accountId, peerId) {
+  return `preview_${accountId}_${peerId}`;
+}
+
+/** 会话列表 snippet 占位：稳定 id，避免每次同步因 lastMessageAt 微变而重复插入 */
+function upsertPreviewMessage(accountId, conversationId, peerId, lastMessage, lastMessageAt) {
+  const hasReal = db
+    .prepare(
+      `SELECT 1 FROM messages
+       WHERE conversation_id = ? AND id NOT LIKE 'preview_%' LIMIT 1`
+    )
+    .get(conversationId);
+  if (hasReal) {
+    db.prepare(
+      `DELETE FROM messages WHERE conversation_id = ? AND id LIKE 'preview_%'`
+    ).run(conversationId);
+    return;
+  }
+
+  let content = String(lastMessage || '');
+  let direction = 'in';
+  if (/^you:\s*/i.test(content)) {
+    direction = 'out';
+    content = content.replace(/^you:\s*/i, '');
+  }
+
+  const t = now();
+  const id = previewMessageId(accountId, peerId);
+  const sentAt = lastMessageAt || null;
+  db.prepare(
+    `INSERT INTO messages
+      (id, conversation_id, account_id, peer_id, direction, content, message_type, sent_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'text', ?, ?)
+     ON CONFLICT(account_id, id) DO UPDATE SET
+       content=excluded.content,
+       direction=excluded.direction,
+       sent_at=COALESCE(excluded.sent_at, messages.sent_at)`
+  ).run(id, conversationId, accountId, peerId, direction, content.slice(0, 2000), sentAt || t, t);
+}
+
+/** 清理历史重复 preview（旧逻辑把时间戳写进 id，每次同步会多一条） */
+export function dedupePreviewMessages(accountId) {
+  const rows = db
+    .prepare(
+      accountId
+        ? `SELECT id, conversation_id, account_id, sent_at, created_at
+           FROM messages WHERE account_id = ? AND id LIKE 'preview_%'`
+        : `SELECT id, conversation_id, account_id, sent_at, created_at
+           FROM messages WHERE id LIKE 'preview_%'`
+    )
+    .all(...(accountId ? [accountId] : []));
+
+  const byConv = new Map();
+  for (const r of rows) {
+    const list = byConv.get(r.conversation_id) || [];
+    list.push(r);
+    byConv.set(r.conversation_id, list);
+  }
+
+  const del = db.prepare('DELETE FROM messages WHERE account_id = ? AND id = ?');
+  const rename = db.prepare(
+    `UPDATE messages SET id = ? WHERE account_id = ? AND id = ?`
+  );
+  let removed = 0;
+
+  for (const [, list] of byConv) {
+    list.sort((a, b) =>
+      String(b.sent_at || b.created_at).localeCompare(String(a.sent_at || a.created_at))
+    );
+    const keep = list[0];
+    for (const extra of list.slice(1)) {
+      del.run(extra.account_id, extra.id);
+      removed++;
+    }
+    // 归一成稳定 id，后续同步可覆盖更新
+    const peerId = db
+      .prepare('SELECT peer_id FROM conversations WHERE id = ?')
+      .get(keep.conversation_id)?.peer_id;
+    if (peerId) {
+      const stable = previewMessageId(keep.account_id, peerId);
+      if (keep.id !== stable) {
+        del.run(keep.account_id, stable); // 若已存在稳定 id 则先删，再改名
+        try {
+          rename.run(stable, keep.account_id, keep.id);
+        } catch {
+          /* unique race: keep as-is */
+        }
+      }
+    }
+
+    // 规范化 Facebook 列表里的 "You: …" 出站 snippet
+    const row = db
+      .prepare(
+        `SELECT id, content FROM messages
+         WHERE conversation_id = ? AND id LIKE 'preview_%' LIMIT 1`
+      )
+      .get(keep.conversation_id);
+    if (row && /^you:\s*/i.test(row.content || '')) {
+      db.prepare(
+        `UPDATE messages SET content = ?, direction = 'out' WHERE id = ? AND account_id = ?`
+      ).run(String(row.content).replace(/^you:\s*/i, ''), row.id, keep.account_id);
+    }
+  }
+  return removed;
+}
+
+export async function syncOne(accountId, opts = {}) {
   const account = getAccount(accountId);
   if (!account) throw new Error('账号不存在');
   if (account.status !== 'active') {
     return { ok: false, reason: 'account_not_active' };
   }
 
-  const result = await syncAccountMessages(accountId);
+  const result = await syncAccountMessages(accountId, {
+    windowBounds: opts.windowBounds || null,
+  });
   if (!result.ok) return result;
 
   // 清掉误抓的导航项（TikTok / 推荐 / 主页 …）
   purgeNoiseConversations(accountId);
 
   let username = result.profile?.username || account.username;
-  let displayName = result.profile?.displayName || account.displayName;
+  const isBadAccountName = (name) => {
+    const t = String(name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^[,.\s]+/, '');
+    if (!t) return true;
+    if (/\b(account|profile|menu|settings)\b/i.test(t) && /your|,/.test(t)) return true;
+    return (
+      /^(notifications?|忘记密码\??|messenger|facebook|meta|find friends|controls and settings|,?\s*your profile|your profile|my profile|account|账号|账户)$/i.test(
+        t
+      ) || /your profile|controls and settings/i.test(t)
+    );
+  };
+  const isWeakAccountName = (name) =>
+    isBadAccountName(name) || /^\d{5,}$/.test(String(name || '').trim());
+  // 优先用本次同步读到的名字；噪声名必须覆盖；纯数字 id 不要覆盖已有真人名
+  let displayName = result.profile?.displayName;
+  if (isWeakAccountName(displayName)) {
+    displayName = isWeakAccountName(account.displayName)
+      ? username || account.label
+      : account.displayName;
+  }
   let avatarUrl = result.profile?.avatarUrl || account.avatarUrl;
   if (avatarUrl && !String(avatarUrl).startsWith('/media/')) {
     try {
@@ -178,21 +330,17 @@ export async function syncOne(accountId) {
 
   const convMap = new Map();
   for (const c of result.conversations) {
-    if (isNoiseConversation(c)) continue;
+    if (isNoiseConversation(c, account.platform)) continue;
     const cid = upsertConversation(accountId, c);
     convMap.set(c.peerId, cid);
 
-    // Ensure at least a placeholder message for inbox preview
+    // 仅在尚无真实消息时，用会话列表 snippet 占位（稳定 id，不随时间戳膨胀）
     if (c.lastMessage) {
-      upsertMessage(accountId, cid, {
-        id: `preview_${c.peerId}_${c.lastMessageAt || ''}`,
-        peerId: c.peerId,
-        direction: 'in',
-        content: c.lastMessage,
-        sentAt: c.lastMessageAt,
-      });
+      upsertPreviewMessage(accountId, cid, c.peerId, c.lastMessage, c.lastMessageAt);
     }
   }
+
+  dedupePreviewMessages(accountId);
 
   for (const m of result.messages) {
     let cid = convMap.get(m.peerId);
@@ -220,12 +368,16 @@ export async function syncOne(accountId) {
   };
 }
 
-export async function syncAll() {
+export async function syncAll(opts = {}) {
   const accounts = listAccounts().filter((a) => a.status === 'active');
   const results = [];
+  const windowBounds = opts.windowBounds || null;
   for (const a of accounts) {
     try {
-      results.push({ accountId: a.id, ...(await syncOne(a.id)) });
+      results.push({
+        accountId: a.id,
+        ...(await syncOne(a.id, { windowBounds })),
+      });
     } catch (e) {
       results.push({ accountId: a.id, ok: false, reason: e.message });
     }
@@ -233,7 +385,7 @@ export async function syncAll() {
   return results;
 }
 
-export async function reply(conversationId, text) {
+export async function reply(conversationId, text, opts = {}) {
   const conv = db
     .prepare(
       `SELECT id, account_id as accountId, peer_id as peerId,
@@ -243,8 +395,16 @@ export async function reply(conversationId, text) {
     .get(conversationId);
   if (!conv) throw new Error('会话不存在');
 
-  const target = conv.peerNickname || conv.peerUsername || conv.peerId;
-  const result = await sendReply(conv.accountId, target, text);
+  const account = getAccount(conv.accountId);
+  const peerId = String(conv.peerId || '');
+  // Facebook：优先真实 thread id；TikTok / DOM 兜底：用昵称匹配列表项
+  const target =
+    account?.platform === 'facebook' && peerId && !peerId.startsWith('dom_')
+      ? peerId
+      : conv.peerNickname || conv.peerUsername || peerId;
+  const result = await sendReply(conv.accountId, target, text, {
+    windowBounds: opts.windowBounds || null,
+  });
   if (!result.ok) return result;
 
   const msgId = `local_${uuid()}`;

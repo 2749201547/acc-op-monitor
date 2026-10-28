@@ -9,6 +9,7 @@ import {
   stopLogin,
   removeAccount,
   getAccount,
+  updateAccount,
 } from './services/accounts.js';
 import {
   listConversations,
@@ -18,6 +19,7 @@ import {
   reply,
 } from './services/inbox.js';
 import { closeAll } from './browser/manager.js';
+import { PLATFORMS, normalizePlatform } from './browser/platforms/index.js';
 import { getDataDir, getPublicDir } from './paths.js';
 
 const app = express();
@@ -31,13 +33,30 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/platforms', (_req, res) => {
+  res.json({
+    platforms: PLATFORMS.map((id) => ({
+      id,
+      label: id === 'facebook' ? 'Facebook' : 'TikTok',
+    })),
+  });
+});
+
 app.get('/api/accounts', (_req, res) => {
   res.json(listAccounts());
 });
 
 app.post('/api/accounts', (req, res) => {
-  const account = createAccount(req.body?.label);
-  res.json(account);
+  try {
+    const platform = normalizePlatform(req.body?.platform);
+    if (!PLATFORMS.includes(platform)) {
+      return res.status(400).json({ error: '不支持的平台' });
+    }
+    const account = createAccount(req.body?.label, platform);
+    res.json(account);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 app.get('/api/accounts/:id', (req, res) => {
@@ -46,9 +65,22 @@ app.get('/api/accounts/:id', (req, res) => {
   res.json(a);
 });
 
+app.patch('/api/accounts/:id', (req, res) => {
+  const a = getAccount(req.params.id);
+  if (!a) return res.status(404).json({ error: '账号不存在' });
+  const label = req.body?.label;
+  if (label === undefined || label === null) {
+    return res.status(400).json({ error: '缺少 label' });
+  }
+  const updated = updateAccount(req.params.id, {
+    label: String(label).trim() || '未分组',
+  });
+  res.json(updated);
+});
+
 app.post('/api/accounts/:id/login', async (req, res) => {
   try {
-    const result = await beginLogin(req.params.id);
+    const result = await beginLogin(req.params.id, req.body?.windowBounds || null);
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -82,9 +114,9 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   res.json(listMessages(req.params.id));
 });
 
-app.post('/api/sync', async (_req, res) => {
+app.post('/api/sync', async (req, res) => {
   try {
-    const results = await syncAll();
+    const results = await syncAll({ windowBounds: req.body?.windowBounds || null });
     res.json({ results });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -93,7 +125,9 @@ app.post('/api/sync', async (_req, res) => {
 
 app.post('/api/accounts/:id/sync', async (req, res) => {
   try {
-    const result = await syncOne(req.params.id);
+    const result = await syncOne(req.params.id, {
+      windowBounds: req.body?.windowBounds || null,
+    });
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -104,7 +138,9 @@ app.post('/api/conversations/:id/reply', async (req, res) => {
   const text = (req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: '内容不能为空' });
   try {
-    const result = await reply(req.params.id, text);
+    const result = await reply(req.params.id, text, {
+      windowBounds: req.body?.windowBounds || null,
+    });
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });

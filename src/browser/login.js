@@ -1,4 +1,11 @@
-import { getContext, closeContext, isLoggedIn, readProfile } from './manager.js';
+import {
+  getContext,
+  closeContext,
+  isLoggedIn,
+  readProfile,
+  reapplyContextWindow,
+} from './manager.js';
+import { getPlatform, normalizePlatform } from './platforms/index.js';
 
 /**
  * @typedef {{
@@ -7,6 +14,7 @@ import { getContext, closeContext, isLoggedIn, readProfile } from './manager.js'
  *   screenshot: string|null,
  *   profile: object|null,
  *   page?: import('playwright-core').Page,
+ *   platform?: string,
  *   startedAt: number,
  *   promise?: Promise<void>,
  * }} LoginSession
@@ -29,7 +37,7 @@ function setSession(accountId, patch) {
 }
 
 /** Start login in background; returns immediately so UI won't freeze. */
-export function startQrLogin(accountId) {
+export function startQrLogin(accountId, platformHint = 'tiktok', windowBounds = null) {
   const existing = loginSessions.get(accountId);
   if (existing?.promise) {
     return {
@@ -37,18 +45,23 @@ export function startQrLogin(accountId) {
       phase: existing.phase,
       message: existing.message,
       screenshot: existing.screenshot,
+      platform: existing.platform,
     };
   }
+
+  const platform = normalizePlatform(platformHint);
 
   setSession(accountId, {
     phase: 'starting',
     message: '正在启动浏览器…',
     screenshot: null,
     profile: null,
+    platform,
+    windowBounds: windowBounds || null,
     startedAt: Date.now(),
   });
 
-  const promise = runLoginFlow(accountId).finally(() => {
+  const promise = runLoginFlow(accountId, platform).finally(() => {
     const s = loginSessions.get(accountId);
     if (s) delete s.promise;
   });
@@ -59,82 +72,84 @@ export function startQrLogin(accountId) {
     phase: 'starting',
     message: '正在启动浏览器…',
     screenshot: null,
+    platform,
   };
 }
 
-async function runLoginFlow(accountId) {
+async function runLoginFlow(accountId, platform) {
+  const adapter = getPlatform(platform);
   try {
     await closeContext(accountId);
+    const windowBounds = loginSessions.get(accountId)?.windowBounds || null;
     setSession(accountId, {
       phase: 'starting',
       message: '正在启动浏览器…',
+      platform,
     });
 
-    // 有界面窗口：可直接扫弹出的 Chrome，不必等截图回传
-    const context = await getContext(accountId, { headless: false });
+    const context = await getContext(accountId, { headless: false, windowBounds });
     const page = context.pages()[0] || (await context.newPage());
     setSession(accountId, {
       page,
       phase: 'loading',
-      message: '正在打开 TikTok 登录页…',
+      message:
+        platform === 'facebook'
+          ? '正在打开 Facebook / Messenger 登录页…'
+          : '正在打开 TikTok 登录页…',
+      platform,
     });
 
-    await page.goto('https://www.tiktok.com/login/qrcode', {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    }).catch(() => null);
-
-    // 备用入口
-    if (!page.url().includes('login')) {
-      await page.goto('https://www.tiktok.com/login', {
-        waitUntil: 'domcontentloaded',
-        timeout: 45000,
-      });
-    }
-
-    // 尽量点到二维码方式
-    const qrSwitch = page.getByText(/二维码|QR Code|扫码登录|使用二维码/, { exact: false }).first();
-    if (await qrSwitch.isVisible({ timeout: 2500 }).catch(() => false)) {
-      await qrSwitch.click().catch(() => {});
-    }
-
+    const nav = await adapter.openLoginPage(page);
+    await reapplyContextWindow(accountId).catch(() => {});
     await page.bringToFront().catch(() => {});
     setSession(accountId, {
-      phase: 'waiting',
-      message: '请在弹出的浏览器窗口中扫码（也可看下方预览）',
+      phase: nav.phase || 'waiting',
+      message: nav.message || adapter.loginHints.waitingMessage,
     });
 
-    // 异步截图，不阻塞「可扫码」状态
     refreshScreenshot(accountId).catch(() => {});
 
-    const deadline = Date.now() + 3 * 60 * 1000;
+    const deadline = Date.now() + 5 * 60 * 1000;
     while (Date.now() < deadline) {
       const session = loginSessions.get(accountId);
       if (!session || session.phase === 'error') return;
 
-      if (await isLoggedIn(context)) {
+      if (await isLoggedIn(context, platform)) {
         setSession(accountId, {
           phase: 'loading',
-          message: '登录成功，正在读取账号信息…',
+          message: '登录成功，正在提取账号信息…',
         });
-        const profile = await readProfile(context).catch(() => ({
-          username: null,
-          displayName: null,
-          avatarUrl: null,
-        }));
+        // Facebook 完整读资料会串行下头像/Graph，CDN 超时能卡数分钟；登录只走快路径 + 硬超时
+        let profile = await Promise.race([
+          readProfile(context, platform, {
+            fast: true,
+            accountId,
+          }).catch(() => null),
+          new Promise((resolve) =>
+            setTimeout(() => resolve(null), platform === 'facebook' ? 12000 : 25000)
+          ),
+        ]);
+        if (!profile?.username) {
+          // 超时也至少带上 cookie 里的用户 id，避免一直卡在「提取账号信息」
+          const cookies = await context.cookies().catch(() => []);
+          const cUser = cookies.find((c) => c.name === 'c_user')?.value || null;
+          profile = {
+            username: profile?.username || cUser,
+            displayName: profile?.displayName || cUser,
+            avatarUrl: profile?.avatarUrl || null,
+          };
+        }
         setSession(accountId, {
           phase: 'logged_in',
           message: '登录成功',
           profile,
           screenshot: null,
         });
-        // 关掉可见窗口，后续同步用无头模式更省资源
         await closeContext(accountId);
         return;
       }
 
       await sleep(1500);
-      // 偶尔刷新预览图（二维码会过期刷新）
       if (Date.now() % 2 === 0) {
         refreshScreenshot(accountId).catch(() => {});
       }
@@ -142,7 +157,10 @@ async function runLoginFlow(accountId) {
 
     setSession(accountId, {
       phase: 'expired',
-      message: '二维码已过期，请重新扫码',
+      message:
+        platform === 'facebook'
+          ? '登录超时，请重新打开并完成登录'
+          : '二维码已过期，请重新扫码',
     });
   } catch (e) {
     setSession(accountId, {
@@ -171,11 +189,15 @@ export async function getLoginStatus(accountId) {
       message: '',
       profile: null,
       screenshot: null,
+      platform: null,
     };
   }
 
+  const base = { platform: session.platform || null };
+
   if (session.phase === 'logged_in') {
     return {
+      ...base,
       status: 'logged_in',
       phase: 'logged_in',
       message: session.message,
@@ -186,6 +208,7 @@ export async function getLoginStatus(accountId) {
 
   if (session.phase === 'expired') {
     return {
+      ...base,
       status: 'expired',
       phase: 'expired',
       message: session.message,
@@ -196,6 +219,7 @@ export async function getLoginStatus(accountId) {
 
   if (session.phase === 'error') {
     return {
+      ...base,
       status: 'error',
       phase: 'error',
       message: session.message,
@@ -205,6 +229,7 @@ export async function getLoginStatus(accountId) {
   }
 
   return {
+    ...base,
     status: 'waiting',
     phase: session.phase,
     message: session.message,
