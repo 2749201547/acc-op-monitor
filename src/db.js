@@ -55,6 +55,26 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, sent_at);
+
+  CREATE TABLE IF NOT EXISTS proxy_regions (
+    name TEXT PRIMARY KEY,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS proxy_profiles (
+    id TEXT PRIMARY KEY,
+    region TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    server TEXT NOT NULL,
+    username TEXT,
+    password TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(region) REFERENCES proxy_regions(name) ON UPDATE CASCADE ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_proxy_profiles_region ON proxy_profiles(region, created_at);
 `);
 
 // 旧库补列
@@ -75,6 +95,30 @@ try {
   }
   if (!names.has('proxy_region')) {
     db.exec(`ALTER TABLE accounts ADD COLUMN proxy_region TEXT`);
+  }
+  if (!names.has('proxy_profile_id')) {
+    db.exec(`ALTER TABLE accounts ADD COLUMN proxy_profile_id TEXT`);
+  }
+} catch {
+  /* ignore */
+}
+
+// 默认国家分组（可自行增删）
+try {
+  const count = db.prepare('SELECT COUNT(*) AS c FROM proxy_regions').get()?.c || 0;
+  if (count === 0) {
+    const t = new Date().toISOString();
+    const seed = [
+      ['美国', 10],
+      ['马来', 20],
+      ['泰国', 30],
+      ['新加坡', 40],
+      ['菲律宾', 50],
+    ];
+    const ins = db.prepare(
+      'INSERT OR IGNORE INTO proxy_regions (name, sort_order, created_at) VALUES (?, ?, ?)'
+    );
+    for (const [name, order] of seed) ins.run(name, order, t);
   }
 } catch {
   /* ignore */

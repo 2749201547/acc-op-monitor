@@ -22,6 +22,17 @@ import {
 } from './services/inbox.js';
 import { closeAll } from './browser/manager.js';
 import { PLATFORMS, normalizePlatform } from './browser/platforms/index.js';
+import {
+  listProxyRegions,
+  createProxyRegion,
+  renameProxyRegion,
+  deleteProxyRegion,
+  listProxyProfiles,
+  createProxyProfile,
+  updateProxyProfile,
+  deleteProxyProfile,
+  getProxyProfile,
+} from './services/proxies.js';
 import { getDataDir, getPublicDir } from './paths.js';
 
 const app = express();
@@ -87,11 +98,79 @@ app.patch('/api/accounts/:id/proxy', async (req, res) => {
       username: req.body?.username,
       password: req.body?.password,
       region: req.body?.region,
+      profileId: req.body?.profileId,
     });
     res.json(updated);
   } catch (e) {
-    const notFound = e.message === '账号不存在';
+    const notFound = e.message === '账号不存在' || e.message === '代理配置不存在';
     res.status(notFound ? 404 : 400).json({ error: e.message });
+  }
+});
+
+app.get('/api/proxies/regions', (_req, res) => {
+  res.json(listProxyRegions());
+});
+
+app.post('/api/proxies/regions', (req, res) => {
+  try {
+    res.json(createProxyRegion(req.body?.name));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.patch('/api/proxies/regions/:name', (req, res) => {
+  try {
+    res.json(renameProxyRegion(req.params.name, req.body?.name));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/proxies/regions/:name', (req, res) => {
+  try {
+    res.json(deleteProxyRegion(req.params.name));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/proxies/profiles', (req, res) => {
+  res.json(listProxyProfiles(req.query.region || null));
+});
+
+app.post('/api/proxies/profiles', (req, res) => {
+  try {
+    res.json(
+      createProxyProfile({
+        region: req.body?.region,
+        label: req.body?.label,
+        server: req.body?.server,
+        username: req.body?.username,
+        password: req.body?.password,
+      })
+    );
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.patch('/api/proxies/profiles/:id', (req, res) => {
+  try {
+    if (!getProxyProfile(req.params.id)) {
+      return res.status(404).json({ error: '代理不存在' });
+    }
+    res.json(updateProxyProfile(req.params.id, req.body || {}));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/proxies/profiles/:id', (req, res) => {
+  try {
+    res.json(deleteProxyProfile(req.params.id));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 

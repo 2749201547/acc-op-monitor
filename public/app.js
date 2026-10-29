@@ -38,12 +38,32 @@ const els = {
   btnOkConfirm: document.getElementById('btnOkConfirm'),
   proxyDialog: document.getElementById('proxyDialog'),
   proxyForm: document.getElementById('proxyForm'),
+  proxyProfilePick: document.getElementById('proxyProfilePick'),
   proxyRegion: document.getElementById('proxyRegion'),
   proxyServer: document.getElementById('proxyServer'),
   proxyUsername: document.getElementById('proxyUsername'),
   proxyPassword: document.getElementById('proxyPassword'),
   btnClearProxy: document.getElementById('btnClearProxy'),
   btnSaveProxy: document.getElementById('btnSaveProxy'),
+  btnProxyManager: document.getElementById('btnProxyManager'),
+  proxyManager: document.getElementById('proxyManager'),
+  btnCloseProxyManager: document.getElementById('btnCloseProxyManager'),
+  btnAddProxyRegion: document.getElementById('btnAddProxyRegion'),
+  btnAddProxyProfile: document.getElementById('btnAddProxyProfile'),
+  proxyRegionList: document.getElementById('proxyRegionList'),
+  proxyProfileList: document.getElementById('proxyProfileList'),
+  proxyProfileRegionTitle: document.getElementById('proxyProfileRegionTitle'),
+  proxyRegionDialog: document.getElementById('proxyRegionDialog'),
+  proxyRegionForm: document.getElementById('proxyRegionForm'),
+  proxyRegionDialogTitle: document.getElementById('proxyRegionDialogTitle'),
+  proxyRegionNameInput: document.getElementById('proxyRegionNameInput'),
+  proxyProfileDialog: document.getElementById('proxyProfileDialog'),
+  proxyProfileForm: document.getElementById('proxyProfileForm'),
+  proxyProfileDialogTitle: document.getElementById('proxyProfileDialogTitle'),
+  proxyProfileLabelInput: document.getElementById('proxyProfileLabelInput'),
+  proxyProfileServerInput: document.getElementById('proxyProfileServerInput'),
+  proxyProfileUsernameInput: document.getElementById('proxyProfileUsernameInput'),
+  proxyProfilePasswordInput: document.getElementById('proxyProfilePasswordInput'),
   accountContextMenu: document.getElementById('accountContextMenu'),
   groupContextMenu: document.getElementById('groupContextMenu'),
   groupPlatformPicker: document.getElementById('groupPlatformPicker'),
@@ -348,7 +368,7 @@ async function api(url, options) {
 function statusLabel(status, platform) {
   const map = {
     pending: '待登录',
-    logging_in: platform === 'facebook' ? '登录中' : '扫码中',
+    logging_in: '登录中',
     active: '已登录',
     expired: '已过期',
   };
@@ -492,6 +512,14 @@ function clearAccountSelection() {
   selectedAccountId = null;
   selectedAccountIds = new Set();
   lastAccountClickId = null;
+}
+
+async function clearAccountSelectionAndRefresh() {
+  if (!selectedAccountIds.size && !selectedAccountId) return;
+  clearAccountSelection();
+  renderAccounts();
+  renderPlatformFilter();
+  await refreshConversations();
 }
 
 function getSelectedAccountIds() {
@@ -833,19 +861,17 @@ let loginSucceeded = false;
 function applyLoginEmbedCopy(platform, statusText) {
   const isFb = platform === 'facebook';
   if (els.syncEmbedTitle) {
-    els.syncEmbedTitle.textContent = isFb ? 'Facebook 登录' : '扫码登录';
+    els.syncEmbedTitle.textContent = isFb ? 'Facebook 登录' : 'TikTok 登录';
   }
   if (els.syncEmbedStatus) {
     els.syncEmbedStatus.textContent =
       statusText ||
       (isFb
         ? '请在右侧浏览器窗口中完成 Facebook 登录（账密 / 二次验证）'
-        : '请使用 TikTok App 扫描弹出的浏览器窗口');
+        : '请在右侧浏览器窗口中用邮箱或用户名完成 TikTok 登录');
   }
   if (els.qrPlaceholder) {
-    els.qrPlaceholder.textContent = isFb
-      ? '浏览器将贴合此区域，请在窗口内完成登录'
-      : '浏览器启动后会弹出扫码窗口';
+    els.qrPlaceholder.textContent = '浏览器将贴合此区域，请在窗口内完成登录';
   }
 }
 
@@ -856,7 +882,7 @@ async function startLogin(accountId) {
   const account = accounts.find((a) => a.id === accountId);
   const platform = account?.platform || 'tiktok';
   showChatEmbed({
-    title: platform === 'facebook' ? 'Facebook 登录' : '扫码登录',
+    title: platform === 'facebook' ? 'Facebook 登录' : 'TikTok 登录',
     status: '正在启动',
     showCancel: true,
   });
@@ -899,12 +925,7 @@ async function startLogin(accountId) {
         clearLoginRedockTimers();
         applyLoginEmbedCopy(
           p,
-          st.message ||
-            (st.status === 'expired'
-              ? p === 'facebook'
-                ? '登录超时，请重试'
-                : '二维码已过期，请重新扫码'
-              : '登录失败')
+          st.message || (st.status === 'expired' ? '登录超时，请重试' : '登录失败')
         );
       }
     } catch (e) {
@@ -1381,12 +1402,67 @@ function showAccountContextMenu(accountIds, x, y) {
 }
 
 let proxyEditAccountId = null;
+let proxyRegionsCache = [];
+let proxyProfilesCache = [];
+let proxyManagerRegion = null;
 
-function openProxyDialog(accountId) {
+async function loadProxyCatalog() {
+  const [regions, profiles] = await Promise.all([
+    api('/api/proxies/regions'),
+    api('/api/proxies/profiles'),
+  ]);
+  proxyRegionsCache = Array.isArray(regions) ? regions : [];
+  proxyProfilesCache = Array.isArray(profiles) ? profiles : [];
+  return { regions: proxyRegionsCache, profiles: proxyProfilesCache };
+}
+
+function fillAccountProxyRegionOptions(selected = '') {
+  if (!els.proxyRegion) return;
+  const opts = ['<option value="">不标注</option>'].concat(
+    proxyRegionsCache.map(
+      (r) =>
+        `<option value="${escapeHtml(r.name)}"${r.name === selected ? ' selected' : ''}>${escapeHtml(
+          r.name
+        )}</option>`
+    )
+  );
+  els.proxyRegion.innerHTML = opts.join('');
+}
+
+function fillAccountProxyProfileOptions(selectedId = '') {
+  if (!els.proxyProfilePick) return;
+  const opts = ['<option value="">手动填写 / 不选用</option>'].concat(
+    proxyProfilesCache.map((p) => {
+      const label = p.label || p.server;
+      const text = `${p.region} · ${label}`;
+      return `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(
+        text
+      )}</option>`;
+    })
+  );
+  els.proxyProfilePick.innerHTML = opts.join('');
+}
+
+function applyPickedProxyProfile(profileId) {
+  const p = proxyProfilesCache.find((x) => x.id === profileId);
+  if (!p) return;
+  if (els.proxyRegion) els.proxyRegion.value = p.region || '';
+  if (els.proxyServer) els.proxyServer.value = p.server || '';
+  if (els.proxyUsername) els.proxyUsername.value = p.username || '';
+  if (els.proxyPassword) els.proxyPassword.value = p.password || '';
+}
+
+async function openProxyDialog(accountId) {
   const account = accounts.find((a) => a.id === accountId);
   if (!account || !els.proxyDialog) return;
   proxyEditAccountId = accountId;
-  if (els.proxyRegion) els.proxyRegion.value = account.proxyRegion || '';
+  try {
+    await loadProxyCatalog();
+  } catch {
+    /* offline catalog ok */
+  }
+  fillAccountProxyRegionOptions(account.proxyRegion || '');
+  fillAccountProxyProfileOptions(account.proxyProfileId || '');
   if (els.proxyServer) els.proxyServer.value = account.proxyServer || '';
   if (els.proxyUsername) els.proxyUsername.value = account.proxyUsername || '';
   if (els.proxyPassword) els.proxyPassword.value = account.proxyPassword || '';
@@ -1397,14 +1473,21 @@ function openProxyDialog(accountId) {
 async function saveAccountProxy({ clear = false } = {}) {
   const id = proxyEditAccountId;
   if (!id) return;
-  const body = clear
-    ? { server: '', username: '', password: '', region: '' }
-    : {
-        server: els.proxyServer?.value?.trim() || '',
-        username: els.proxyUsername?.value?.trim() || '',
-        password: els.proxyPassword?.value ?? '',
-        region: els.proxyRegion?.value || '',
-      };
+  const profileId = els.proxyProfilePick?.value || '';
+  let body;
+  if (clear) {
+    body = { server: '', username: '', password: '', region: '', profileId: '' };
+  } else if (profileId) {
+    body = { profileId };
+  } else {
+    body = {
+      server: els.proxyServer?.value?.trim() || '',
+      username: els.proxyUsername?.value?.trim() || '',
+      password: els.proxyPassword?.value ?? '',
+      region: els.proxyRegion?.value || '',
+      profileId: '',
+    };
+  }
   await api(`/api/accounts/${id}/proxy`, {
     method: 'PATCH',
     body: JSON.stringify(body),
@@ -1412,6 +1495,223 @@ async function saveAccountProxy({ clear = false } = {}) {
   proxyEditAccountId = null;
   els.proxyDialog?.close();
   await refreshAccounts();
+}
+
+function renderProxyRegionList() {
+  if (!els.proxyRegionList) return;
+  if (!proxyRegionsCache.length) {
+    els.proxyRegionList.innerHTML = '<li class="proxy-empty">还没有国家，点右上角添加</li>';
+    return;
+  }
+  if (!proxyManagerRegion || !proxyRegionsCache.some((r) => r.name === proxyManagerRegion)) {
+    proxyManagerRegion = proxyRegionsCache[0]?.name || null;
+  }
+  els.proxyRegionList.innerHTML = proxyRegionsCache
+    .map((r) => {
+      const count = proxyProfilesCache.filter((p) => p.region === r.name).length;
+      const active = r.name === proxyManagerRegion ? ' active' : '';
+      return `<li class="proxy-region-row">
+        <button type="button" class="proxy-region-item${active}" data-region="${escapeHtml(r.name)}">
+          <span class="proxy-region-item-name">${escapeHtml(r.name)}</span>
+          <span class="muted">${count}</span>
+        </button>
+        <div class="proxy-item-actions">
+          <button type="button" class="btn" data-region-act="rename" data-region="${escapeHtml(
+            r.name
+          )}">改</button>
+          <button type="button" class="btn" data-region-act="delete" data-region="${escapeHtml(
+            r.name
+          )}">删</button>
+        </div>
+      </li>`;
+    })
+    .join('');
+}
+
+function renderProxyProfileList() {
+  if (!els.proxyProfileList) return;
+  const region = proxyManagerRegion;
+  if (els.proxyProfileRegionTitle) {
+    els.proxyProfileRegionTitle.textContent = region ? `${region} · 代理` : '代理列表';
+  }
+  if (!region) {
+    els.proxyProfileList.innerHTML = '<li class="proxy-empty">先选择或添加一个国家</li>';
+    return;
+  }
+  const list = proxyProfilesCache.filter((p) => p.region === region);
+  if (!list.length) {
+    els.proxyProfileList.innerHTML =
+      '<li class="proxy-empty">该国家还没有代理，点右上角 + 代理</li>';
+    return;
+  }
+  els.proxyProfileList.innerHTML = list
+    .map(
+      (p) => `<li class="proxy-profile-item" data-id="${escapeHtml(p.id)}">
+        <div class="proxy-profile-item-main">
+          <strong>${escapeHtml(p.label || '未命名线路')}</strong>
+          <span title="${escapeHtml(p.server)}">${escapeHtml(p.server)}</span>
+        </div>
+        <div class="proxy-item-actions">
+          <button type="button" class="btn" data-proxy-act="edit">编辑</button>
+          <button type="button" class="btn" data-proxy-act="delete">删除</button>
+        </div>
+      </li>`
+    )
+    .join('');
+}
+
+async function refreshProxyManager() {
+  await loadProxyCatalog();
+  renderProxyRegionList();
+  renderProxyProfileList();
+}
+
+async function openProxyManager() {
+  if (!els.proxyManager) return;
+  els.proxyManager.hidden = false;
+  try {
+    await refreshProxyManager();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function closeProxyManager() {
+  if (els.proxyManager) els.proxyManager.hidden = true;
+}
+
+let proxyRegionEditName = null;
+let proxyProfileEditId = null;
+
+function openProxyRegionDialog({ title = '添加国家', name = '', renameFrom = null } = {}) {
+  return new Promise((resolve) => {
+    if (!els.proxyRegionDialog) {
+      resolve(null);
+      return;
+    }
+    proxyRegionEditName = renameFrom;
+    if (els.proxyRegionDialogTitle) els.proxyRegionDialogTitle.textContent = title;
+    if (els.proxyRegionNameInput) els.proxyRegionNameInput.value = name || '';
+    els.proxyRegionDialog.returnValue = '';
+    const onClose = () => {
+      els.proxyRegionDialog.removeEventListener('close', onClose);
+      const ok = els.proxyRegionDialog.returnValue === 'save';
+      const value = String(els.proxyRegionNameInput?.value || '').trim();
+      resolve(ok && value ? value : null);
+    };
+    els.proxyRegionDialog.addEventListener('close', onClose);
+    els.proxyRegionDialog.showModal();
+    els.proxyRegionNameInput?.focus();
+    els.proxyRegionNameInput?.select?.();
+  });
+}
+
+function openProxyProfileDialog(existing = null) {
+  return new Promise((resolve) => {
+    if (!els.proxyProfileDialog) {
+      resolve(null);
+      return;
+    }
+    proxyProfileEditId = existing?.id || null;
+    if (els.proxyProfileDialogTitle) {
+      els.proxyProfileDialogTitle.textContent = existing ? '编辑代理' : '添加代理';
+    }
+    if (els.proxyProfileLabelInput) els.proxyProfileLabelInput.value = existing?.label || '';
+    if (els.proxyProfileServerInput) {
+      els.proxyProfileServerInput.value = existing?.server || 'socks5://127.0.0.1:';
+    }
+    if (els.proxyProfileUsernameInput) {
+      els.proxyProfileUsernameInput.value = existing?.username || '';
+    }
+    if (els.proxyProfilePasswordInput) {
+      els.proxyProfilePasswordInput.value = existing?.password || '';
+    }
+    els.proxyProfileDialog.returnValue = '';
+    const onClose = () => {
+      els.proxyProfileDialog.removeEventListener('close', onClose);
+      if (els.proxyProfileDialog.returnValue !== 'save') {
+        resolve(null);
+        return;
+      }
+      resolve({
+        label: String(els.proxyProfileLabelInput?.value || '').trim(),
+        server: String(els.proxyProfileServerInput?.value || '').trim(),
+        username: String(els.proxyProfileUsernameInput?.value || '').trim(),
+        password: els.proxyProfilePasswordInput?.value ?? '',
+      });
+    };
+    els.proxyProfileDialog.addEventListener('close', onClose);
+    els.proxyProfileDialog.showModal();
+    els.proxyProfileServerInput?.focus();
+  });
+}
+
+async function addProxyRegion() {
+  const name = await openProxyRegionDialog({ title: '添加国家' });
+  if (!name) return;
+  await api('/api/proxies/regions', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+  proxyManagerRegion = name;
+  await refreshProxyManager();
+}
+
+async function renameProxyRegion(oldName) {
+  const name = await openProxyRegionDialog({
+    title: '重命名国家',
+    name: oldName,
+    renameFrom: oldName,
+  });
+  if (!name || name === oldName) return;
+  await api(`/api/proxies/regions/${encodeURIComponent(oldName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+  proxyManagerRegion = name;
+  await refreshProxyManager();
+}
+
+async function deleteProxyRegionByName(name) {
+  const ok = await askConfirm(`确定删除国家「${name}」？\n需先清空其下全部代理。`, {
+    title: '删除国家',
+  });
+  if (!ok) return;
+  await api(`/api/proxies/regions/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (proxyManagerRegion === name) proxyManagerRegion = null;
+  await refreshProxyManager();
+}
+
+async function addOrEditProxyProfile(existing = null) {
+  if (!proxyManagerRegion) {
+    alert('请先选择国家');
+    return;
+  }
+  const data = await openProxyProfileDialog(existing);
+  if (!data) return;
+  if (!data.server) {
+    alert('请填写代理地址');
+    return;
+  }
+
+  if (existing?.id) {
+    await api(`/api/proxies/profiles/${existing.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        region: proxyManagerRegion,
+        ...data,
+      }),
+    });
+  } else {
+    await api('/api/proxies/profiles', {
+      method: 'POST',
+      body: JSON.stringify({
+        region: proxyManagerRegion,
+        ...data,
+      }),
+    });
+  }
+  await refreshProxyManager();
 }
 
 function showGroupContextMenu(groupName, x, y) {
@@ -1766,6 +2066,9 @@ async function endAccountMarquee() {
 els.accountList.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   if (e.target.closest('button, a, input, textarea, select')) return;
+  // 阻止从上往下拖时出现系统蓝色文字选区，只走我们的框选
+  e.preventDefault();
+  window.getSelection()?.removeAllRanges?.();
   accountPointerSelect = {
     startX: e.clientX,
     startY: e.clientY,
@@ -1789,8 +2092,13 @@ els.accountList.addEventListener('pointermove', (e) => {
     if (Math.hypot(dx, dy) < ACCOUNT_MARQUEE_THRESHOLD) return;
     accountPointerSelect.active = true;
     els.accountList.classList.add('is-marquee-selecting');
+    window.getSelection()?.removeAllRanges?.();
   }
   updateAccountMarquee(e.clientX, e.clientY);
+});
+
+els.accountList.addEventListener('dragstart', (e) => {
+  e.preventDefault();
 });
 
 els.accountList.addEventListener('pointerup', (e) => {
@@ -1809,9 +2117,13 @@ els.accountList.addEventListener('click', async (e) => {
     suppressAccountClick = false;
     return;
   }
-  const item = e.target.closest('[data-id]');
+  const item = e.target.closest('.account-item[data-id]');
   const id = item?.dataset.id;
-  if (!id) return;
+  // 点列表空白：取消多选/选中（操作靠右键）
+  if (!id) {
+    await clearAccountSelectionAndRefresh();
+    return;
+  }
   const multi = e.ctrlKey || e.metaKey;
   const range = e.shiftKey;
   await setAccountFilter(id, { multi, range });
@@ -1870,17 +2182,137 @@ els.proxyForm?.addEventListener('submit', async (e) => {
   }
 });
 
-document.addEventListener('pointerdown', (e) => {
-  const accountOpen = els.accountContextMenu && !els.accountContextMenu.hidden;
-  const groupOpen = els.groupContextMenu && !els.groupContextMenu.hidden;
-  if (!accountOpen && !groupOpen) return;
-  if (accountOpen && els.accountContextMenu.contains(e.target)) return;
-  if (groupOpen && els.groupContextMenu.contains(e.target)) return;
-  hideAllContextMenus();
+els.proxyProfilePick?.addEventListener('change', () => {
+  const id = els.proxyProfilePick.value;
+  if (id) applyPickedProxyProfile(id);
+});
+
+els.btnProxyManager?.addEventListener('click', () => {
+  openProxyManager();
+});
+
+els.btnCloseProxyManager?.addEventListener('click', () => {
+  closeProxyManager();
+});
+
+els.proxyManager?.addEventListener('click', (e) => {
+  if (e.target === els.proxyManager) closeProxyManager();
+});
+
+els.btnAddProxyRegion?.addEventListener('click', async () => {
+  try {
+    await addProxyRegion();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+els.btnAddProxyProfile?.addEventListener('click', async () => {
+  try {
+    await addOrEditProxyProfile();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+els.proxyRegionList?.addEventListener('click', async (e) => {
+  const actBtn = e.target.closest('[data-region-act]');
+  if (actBtn) {
+    const name = actBtn.dataset.region;
+    try {
+      if (actBtn.dataset.regionAct === 'rename') await renameProxyRegion(name);
+      else if (actBtn.dataset.regionAct === 'delete') await deleteProxyRegionByName(name);
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+  const btn = e.target.closest('.proxy-region-item[data-region]');
+  if (!btn) return;
+  proxyManagerRegion = btn.dataset.region;
+  renderProxyRegionList();
+  renderProxyProfileList();
+});
+
+els.proxyProfileList?.addEventListener('click', async (e) => {
+  const actBtn = e.target.closest('[data-proxy-act]');
+  const item = e.target.closest('.proxy-profile-item[data-id]');
+  if (!actBtn || !item) return;
+  const id = item.dataset.id;
+  const profile = proxyProfilesCache.find((p) => p.id === id);
+  if (!profile) return;
+  try {
+    if (actBtn.dataset.proxyAct === 'edit') {
+      await addOrEditProxyProfile(profile);
+    } else if (actBtn.dataset.proxyAct === 'delete') {
+      const ok = await askConfirm(`确定删除代理「${profile.label || profile.server}」？`, {
+        title: '删除代理',
+      });
+      if (!ok) return;
+      await api(`/api/proxies/profiles/${id}`, { method: 'DELETE' });
+      await refreshProxyManager();
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+els.proxyRegionForm?.addEventListener('submit', (e) => {
+  const value = e.submitter?.value || 'cancel';
+  if (value !== 'save') return;
+  const name = String(els.proxyRegionNameInput?.value || '').trim();
+  if (!name) {
+    e.preventDefault();
+    alert('请输入国家/地区名称');
+  }
+});
+
+els.proxyProfileForm?.addEventListener('submit', (e) => {
+  const value = e.submitter?.value || 'cancel';
+  if (value !== 'save') return;
+  const server = String(els.proxyProfileServerInput?.value || '').trim();
+  if (!server) {
+    e.preventDefault();
+    alert('请填写代理地址');
+  }
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') hideAllContextMenus();
+  if (e.key === 'Escape' && els.proxyManager && !els.proxyManager.hidden) {
+    closeProxyManager();
+  }
+});
+
+document.addEventListener('pointerdown', (e) => {
+  const accountOpen = els.accountContextMenu && !els.accountContextMenu.hidden;
+  const groupOpen = els.groupContextMenu && !els.groupContextMenu.hidden;
+  if (accountOpen || groupOpen) {
+    if (accountOpen && els.accountContextMenu.contains(e.target)) return;
+    if (groupOpen && els.groupContextMenu.contains(e.target)) return;
+    hideAllContextMenus();
+  }
+
+  // 左键点账号列表以外：取消选中（批量操作走右键菜单）
+  if (e.button !== 0) return;
+  if (!selectedAccountIds.size && !selectedAccountId) return;
+  if (accountPointerSelect) return;
+  if (e.target.closest('.account-item[data-id]')) return;
+  if (els.accountList?.contains(e.target)) return; // 列表空白交给 click 处理
+  if (
+    e.target.closest(
+      '#accountContextMenu, #groupContextMenu, dialog, .group-platform-picker, .account-marquee'
+    )
+  ) {
+    return;
+  }
+  clearAccountSelectionAndRefresh();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    hideAllContextMenus();
+    clearAccountSelectionAndRefresh();
+  }
 });
 
 window.addEventListener('blur', hideAllContextMenus);

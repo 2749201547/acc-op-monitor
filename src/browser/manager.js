@@ -100,10 +100,8 @@ async function launchPersistent(dir, headless, windowBounds, proxy) {
     // content size, so outer frame becomes taller than our slot (esp. 2nd+ profiles).
     args.push(`--window-position=${bounds.x},${bounds.y}`);
   }
-  // 无账号代理时强制直连，避免吃 Windows「系统代理」；有代理时由 Playwright proxy 接管
-  if (!proxy) {
-    args.push('--no-proxy-server');
-  }
+  // 有账号代理：走该代理（Playwright proxy，不吃系统代理）
+  // 无账号代理：不强制直连，沿用系统代理/Clash，否则国内上不了 Facebook
   const base = {
     headless,
     // null = viewport follows real window; avoids setViewportSize stretching the frame

@@ -8,29 +8,28 @@ import {
 } from '../browser/login.js';
 import { closeContext } from '../browser/manager.js';
 import { normalizePlatform, PLATFORMS } from '../browser/platforms/index.js';
+import { getProxyProfile } from './proxies.js';
 import fs from 'fs';
 
 function now() {
   return new Date().toISOString();
 }
 
-export const PROXY_REGIONS = ['美国', '马来', '泰国', '新加坡', '菲律宾'];
-
 const ACCOUNT_SELECT = `SELECT id, label, platform, username, display_name as displayName, avatar_url as avatarUrl,
               status, last_sync_at as lastSyncAt, created_at as createdAt, updated_at as updatedAt,
               proxy_server as proxyServer, proxy_username as proxyUsername, proxy_password as proxyPassword,
-              proxy_region as proxyRegion
+              proxy_region as proxyRegion, proxy_profile_id as proxyProfileId
        FROM accounts`;
 
 /**
- * @param {{ server?: string|null, username?: string|null, password?: string|null, region?: string|null }} raw
+ * @param {{ server?: string|null, username?: string|null, password?: string|null, region?: string|null, profileId?: string|null }} raw
  */
 export function normalizeProxyConfig(raw = {}) {
-  const regionRaw = String(raw.region ?? '').trim();
-  const region = regionRaw && PROXY_REGIONS.includes(regionRaw) ? regionRaw : null;
+  const regionRaw = String(raw.region ?? '').trim().slice(0, 40);
+  const region = regionRaw || null;
   const server = String(raw.server ?? '').trim();
   if (!server) {
-    return { server: null, username: null, password: null, region };
+    return { server: null, username: null, password: null, region: null, profileId: null };
   }
   if (!/^(https?|socks5):\/\//i.test(server)) {
     throw new Error('代理地址须以 http://、https:// 或 socks5:// 开头');
@@ -41,7 +40,8 @@ export function normalizeProxyConfig(raw = {}) {
     passwordRaw === undefined || passwordRaw === null || String(passwordRaw) === ''
       ? null
       : String(passwordRaw);
-  return { server, username, password, region };
+  const profileId = String(raw.profileId ?? '').trim() || null;
+  return { server, username, password, region, profileId };
 }
 
 export function listAccounts() {
@@ -85,15 +85,30 @@ export function updateAccount(id, fields) {
 }
 
 /** Save per-account proxy and drop any open browser so next launch picks it up. */
-export async function updateAccountProxy(id, raw) {
+export async function updateAccountProxy(id, raw = {}) {
   const a = getAccount(id);
   if (!a) throw new Error('账号不存在');
-  const proxy = normalizeProxyConfig(raw);
-  // 无代理地址时不保留地区备注，避免列表误显示
+
+  let payload = raw;
+  if (raw.profileId) {
+    const profile = getProxyProfile(raw.profileId);
+    if (!profile) throw new Error('代理配置不存在');
+    payload = {
+      server: profile.server,
+      username: profile.username,
+      password: profile.password,
+      region: profile.region,
+      profileId: profile.id,
+    };
+  }
+
+  const proxy = normalizeProxyConfig(payload);
   const region = proxy.server ? proxy.region : null;
+  const profileId = proxy.server ? proxy.profileId : null;
   db.prepare(
-    `UPDATE accounts SET proxy_server=?, proxy_username=?, proxy_password=?, proxy_region=?, updated_at=? WHERE id=?`
-  ).run(proxy.server, proxy.username, proxy.password, region, now(), id);
+    `UPDATE accounts SET proxy_server=?, proxy_username=?, proxy_password=?, proxy_region=?,
+     proxy_profile_id=?, updated_at=? WHERE id=?`
+  ).run(proxy.server, proxy.username, proxy.password, region, profileId, now(), id);
   await closeContext(id);
   return getAccount(id);
 }

@@ -123,6 +123,9 @@
             </button>
           </div>
           <ul id="groupList" class="group-list autohide-scroll"></ul>
+          <button type="button" class="proxy-entry-btn" id="btnProxyManager" title="管理代理 / 国家分组">
+            Proxy
+          </button>
         </section>
       </aside>
 
@@ -175,13 +178,13 @@
         <!-- 同步 / 登录：遮住会话区（无黑屏遮罩），Chrome 贴合下方槽位 -->
         <div id="syncEmbedOverlay" class="sync-embed-overlay" hidden>
           <header class="sync-embed-head">
+            <button type="button" id="btnCancelLogin" class="btn sync-embed-cancel" hidden>
+              取消
+            </button>
             <div class="sync-embed-head-text">
               <h2 id="syncEmbedTitle">正在同步</h2>
               <p id="syncEmbedStatus" class="muted"></p>
             </div>
-            <button type="button" id="btnCancelLogin" class="btn sync-embed-cancel" hidden>
-              取消
-            </button>
           </header>
           <div class="browser-embed-slot sync-embed-slot" id="syncEmbedSlot">
             <div id="qrPlaceholder" class="qr-placeholder">浏览器将贴合此区域</div>
@@ -234,19 +237,18 @@
 
     <dialog id="proxyDialog">
       <form method="dialog" class="dialog-card" id="proxyForm">
-        <h3>代理设置</h3>
-        <p class="muted">
-          仅对该账号浏览器生效，不受系统代理影响。Clash 本地端口例：socks5://127.0.0.1:11002
-        </p>
+        <h3>账号代理</h3>
+        <p class="muted">从 Proxy 库选用，或手动填写本地 Clash 端口。</p>
         <label class="field">
-          <span>地区备注</span>
+          <span>选用已保存代理</span>
+          <select id="proxyProfilePick" name="profileId">
+            <option value="">手动填写 / 不选用</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>国家/地区</span>
           <select id="proxyRegion" name="region">
             <option value="">不标注</option>
-            <option value="美国">美国</option>
-            <option value="马来">马来</option>
-            <option value="泰国">泰国</option>
-            <option value="新加坡">新加坡</option>
-            <option value="菲律宾">菲律宾</option>
           </select>
         </label>
         <label class="field">
@@ -272,6 +274,81 @@
         <div class="dialog-actions dialog-actions-split">
           <button type="submit" class="btn" id="btnClearProxy" value="clear">清除</button>
           <button type="submit" class="btn btn-primary" id="btnSaveProxy" value="save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="proxyManager" class="proxy-manager" hidden>
+      <div class="proxy-manager-panel">
+        <header class="proxy-manager-head">
+          <div>
+            <h2>Proxy</h2>
+            <p class="muted">按国家分组管理代理；账号右键可选用</p>
+          </div>
+          <button type="button" class="btn" id="btnCloseProxyManager">关闭</button>
+        </header>
+        <div class="proxy-manager-body">
+          <aside class="proxy-manager-regions">
+            <div class="proxy-manager-aside-head">
+              <span>国家分组</span>
+              <button type="button" class="btn btn-sm" id="btnAddProxyRegion">+ 国家</button>
+            </div>
+            <ul id="proxyRegionList" class="proxy-region-list"></ul>
+          </aside>
+          <section class="proxy-manager-profiles">
+            <div class="proxy-manager-aside-head">
+              <span id="proxyProfileRegionTitle">代理列表</span>
+              <button type="button" class="btn btn-sm btn-primary" id="btnAddProxyProfile">+ 代理</button>
+            </div>
+            <ul id="proxyProfileList" class="proxy-profile-list"></ul>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <dialog id="proxyRegionDialog">
+      <form method="dialog" class="dialog-card" id="proxyRegionForm">
+        <h3 id="proxyRegionDialogTitle">添加国家</h3>
+        <label class="field">
+          <span>国家 / 地区名称</span>
+          <input id="proxyRegionNameInput" type="text" maxlength="40" placeholder="如：美国、马来、越南" required />
+        </label>
+        <div class="dialog-actions dialog-actions-split">
+          <button type="submit" class="btn" value="cancel">取消</button>
+          <button type="submit" class="btn btn-primary" value="save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="proxyProfileDialog">
+      <form method="dialog" class="dialog-card" id="proxyProfileForm">
+        <h3 id="proxyProfileDialogTitle">添加代理</h3>
+        <label class="field">
+          <span>线路备注</span>
+          <input id="proxyProfileLabelInput" type="text" maxlength="80" placeholder="如：IP1 / 家宽1" />
+        </label>
+        <label class="field">
+          <span>代理地址</span>
+          <input
+            id="proxyProfileServerInput"
+            type="text"
+            maxlength="200"
+            placeholder="socks5://127.0.0.1:11001"
+            required
+            spellcheck="false"
+          />
+        </label>
+        <label class="field">
+          <span>用户名（可选）</span>
+          <input id="proxyProfileUsernameInput" type="text" maxlength="120" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>密码（可选）</span>
+          <input id="proxyProfilePasswordInput" type="password" maxlength="120" autocomplete="new-password" />
+        </label>
+        <div class="dialog-actions dialog-actions-split">
+          <button type="submit" class="btn" value="cancel">取消</button>
+          <button type="submit" class="btn btn-primary" value="save">保存</button>
         </div>
       </form>
     </dialog>

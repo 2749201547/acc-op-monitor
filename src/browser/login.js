@@ -158,10 +158,7 @@ async function runLoginFlow(accountId, platform) {
 
     setSession(accountId, {
       phase: 'expired',
-      message:
-        platform === 'facebook'
-          ? '登录超时，请重新打开并完成登录'
-          : '二维码已过期，请重新扫码',
+      message: '登录超时，请重新打开并完成登录',
     });
   } catch (e) {
     setSession(accountId, {

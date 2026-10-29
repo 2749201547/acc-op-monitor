@@ -3,9 +3,9 @@ import { cacheAvatar, cacheAvatarFromLocator, extractAvatarUrl } from '../avatar
 export const PLATFORM = 'tiktok';
 
 export const loginHints = {
-  dialogTitle: '扫码登录',
-  waitingMessage: '请在弹出的浏览器窗口中扫码（也可看下方预览）',
-  placeholder: '浏览器启动后会弹出扫码窗口',
+  dialogTitle: 'TikTok 登录',
+  waitingMessage: '请在弹出的浏览器窗口中用邮箱或用户名完成 TikTok 登录',
+  placeholder: '浏览器将贴合此区域，请在窗口内完成登录',
 };
 
 export async function isLoggedIn(context) {
@@ -129,23 +129,29 @@ export async function readProfile(context, _opts = {}) {
   return info;
 }
 
-/** Navigate to TikTok QR login page and try to switch to QR mode. */
+/** Open TikTok email/username login directly (skip phone + QR chooser). */
 export async function openLoginPage(page) {
-  await page.goto('https://www.tiktok.com/login/qrcode', {
+  const EMAIL_LOGIN = 'https://www.tiktok.com/login/phone-or-email/email';
+  await page.goto(EMAIL_LOGIN, {
     waitUntil: 'domcontentloaded',
     timeout: 45000,
   }).catch(() => null);
 
-  if (!page.url().includes('login')) {
-    await page.goto('https://www.tiktok.com/login', {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
+  // If TikTok bounced to phone tab, switch to email/username once
+  const emailTab = page
+    .getByText(/使用电子邮箱或用户名登录|邮箱或用户名|Email or username|log in with email/i, {
+      exact: false,
+    })
+    .first();
+  if (await emailTab.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await emailTab.click().catch(() => {});
   }
 
-  const qrSwitch = page.getByText(/二维码|QR Code|扫码登录|使用二维码/, { exact: false }).first();
-  if (await qrSwitch.isVisible({ timeout: 2500 }).catch(() => false)) {
-    await qrSwitch.click().catch(() => {});
+  if (!/tiktok\.com\/login/i.test(page.url())) {
+    await page.goto(EMAIL_LOGIN, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    }).catch(() => null);
   }
 
   return {
