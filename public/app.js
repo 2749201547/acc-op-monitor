@@ -11,19 +11,22 @@ const els = {
   btnBrandSync: document.getElementById('btnBrandSync'),
   btnAccountsSync: document.getElementById('btnAccountsSync'),
   btnBrandAdd: document.getElementById('btnBrandAdd'),
+  btnGroupAdd: document.getElementById('btnGroupAdd'),
   brandHex: document.querySelector('.brand-hex'),
   syncHint: document.getElementById('syncHint'),
   groupDialog: document.getElementById('groupDialog'),
+  groupDialogTitle: document.getElementById('groupDialogTitle'),
   groupDialogHint: document.getElementById('groupDialogHint'),
+  platformPicker: document.getElementById('platformPicker'),
+  platformChips: document.getElementById('platformChips'),
+  groupPicker: document.getElementById('groupPicker'),
   groupChips: document.getElementById('groupChips'),
   groupInput: document.getElementById('groupInput'),
+  groupInputField: document.getElementById('groupInputField'),
+  groupInputLabel: document.getElementById('groupInputLabel'),
   groupForm: document.getElementById('groupForm'),
-  loginDialog: document.getElementById('loginDialog'),
-  loginDialogTitle: document.getElementById('loginDialogTitle'),
-  loginEmbedSlot: document.getElementById('loginEmbedSlot'),
   qrImage: document.getElementById('qrImage'),
   qrPlaceholder: document.getElementById('qrPlaceholder'),
-  loginStatusText: document.getElementById('loginStatusText'),
   btnCancelLogin: document.getElementById('btnCancelLogin'),
   syncEmbedOverlay: document.getElementById('syncEmbedOverlay'),
   syncEmbedTitle: document.getElementById('syncEmbedTitle'),
@@ -33,10 +36,45 @@ const els = {
   confirmDialogTitle: document.getElementById('confirmDialogTitle'),
   confirmDialogMessage: document.getElementById('confirmDialogMessage'),
   btnOkConfirm: document.getElementById('btnOkConfirm'),
+  proxyDialog: document.getElementById('proxyDialog'),
+  proxyForm: document.getElementById('proxyForm'),
+  proxyRegion: document.getElementById('proxyRegion'),
+  proxyServer: document.getElementById('proxyServer'),
+  proxyUsername: document.getElementById('proxyUsername'),
+  proxyPassword: document.getElementById('proxyPassword'),
+  btnClearProxy: document.getElementById('btnClearProxy'),
+  btnSaveProxy: document.getElementById('btnSaveProxy'),
   accountContextMenu: document.getElementById('accountContextMenu'),
+  groupContextMenu: document.getElementById('groupContextMenu'),
+  groupPlatformPicker: document.getElementById('groupPlatformPicker'),
+  groupPlatformOrbit: document.getElementById('groupPlatformOrbit'),
 };
 
-/** Content-relative slot → physical screen rect for Chrome overlay (Electron only). */
+function rectNearlyEqual(a, b, eps = 1) {
+  return (
+    Math.abs(a.left - b.left) <= eps &&
+    Math.abs(a.top - b.top) <= eps &&
+    Math.abs(a.width - b.width) <= eps &&
+    Math.abs(a.height - b.height) <= eps
+  );
+}
+
+/** Wait for dialog layout, then return a stable getBoundingClientRect. */
+async function measureSlotBox(slotEl) {
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  await new Promise((r) => setTimeout(r, 80));
+  let box = slotEl.getBoundingClientRect();
+  for (let i = 0; i < 4; i++) {
+    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise((r) => setTimeout(r, 40));
+    const next = slotEl.getBoundingClientRect();
+    if (rectNearlyEqual(box, next)) return next;
+    box = next;
+  }
+  return box;
+}
+
+/** Content-relative slot → screen DIP rect for Chrome overlay (Electron only). */
 async function getEmbedWindowBounds(slotEl) {
   if (!slotEl) return null;
   if (typeof window.aom?.slotToScreen !== 'function') {
@@ -45,10 +83,7 @@ async function getEmbedWindowBounds(slotEl) {
     );
     return null;
   }
-  // 等 dialog 布局完成再量
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  await new Promise((r) => setTimeout(r, 50));
-  const box = slotEl.getBoundingClientRect();
+  const box = await measureSlotBox(slotEl);
   if (box.width < 40 || box.height < 40) {
     console.warn('[aom] embed slot 尺寸异常', box);
     return null;
@@ -64,7 +99,7 @@ async function getEmbedWindowBounds(slotEl) {
       console.warn('[aom] slotToScreen 返回空');
       return null;
     }
-    // 弹窗贴在虚线框内侧：四边各内缩 2mm（CSS px：96dpi）
+    // 弹窗贴在虚线框内侧：四边各内缩 2mm（CSS px@96dpi）
     const inset = (2 * 96) / 25.4;
     const adjusted = {
       x: Math.round(screenRect.x + inset),
@@ -84,49 +119,169 @@ function accountNeedsHeadedBrowser(account) {
   return account?.platform === 'facebook';
 }
 
+/** Show the right chat-panel embed (sync / login); Chrome docks to the dashed slot. */
+function showChatEmbed({ title, status, showCancel = false }) {
+  const overlay = els.syncEmbedOverlay;
+  if (!overlay) return;
+  if (els.syncEmbedTitle) els.syncEmbedTitle.textContent = title || '';
+  if (els.syncEmbedStatus) els.syncEmbedStatus.textContent = status || '';
+  if (els.btnCancelLogin) els.btnCancelLogin.hidden = !showCancel;
+  if (els.qrImage) {
+    els.qrImage.removeAttribute('src');
+    els.qrImage.hidden = true;
+  }
+  if (els.qrPlaceholder) {
+    els.qrPlaceholder.hidden = false;
+    els.qrPlaceholder.textContent = '浏览器将贴合此区域';
+  }
+  overlay.hidden = false;
+}
+
+function hideChatEmbed() {
+  const overlay = els.syncEmbedOverlay;
+  if (!overlay) return;
+  overlay.hidden = true;
+  if (els.btnCancelLogin) els.btnCancelLogin.hidden = true;
+  if (els.qrImage) {
+    els.qrImage.removeAttribute('src');
+    els.qrImage.hidden = true;
+  }
+  if (els.qrPlaceholder) els.qrPlaceholder.hidden = false;
+}
+
+function isChatEmbedOpen() {
+  return Boolean(els.syncEmbedOverlay && !els.syncEmbedOverlay.hidden);
+}
+
 /**
- * Cover the right chat panel (no modal / no black backdrop); Chrome docks to the slot.
+ * Cover the right chat panel during sync; Chrome docks to the slot.
  * @template T
  * @param {string} statusText
  * @param {(bounds: object|null) => Promise<T>} fn
  * @returns {Promise<T>}
  */
 async function withSyncEmbed(statusText, fn) {
-  const overlay = els.syncEmbedOverlay;
-  if (!overlay) return fn(null);
-  if (els.syncEmbedTitle) els.syncEmbedTitle.textContent = '正在同步';
-  if (els.syncEmbedStatus) {
-    els.syncEmbedStatus.textContent = statusText || '浏览器贴合下方区域，请稍候…';
-  }
-  overlay.hidden = false;
+  if (!els.syncEmbedOverlay) return fn(null);
+  showChatEmbed({
+    title: '正在同步',
+    status: statusText || '浏览器贴合下方区域，请稍候',
+    showCancel: false,
+  });
   try {
     const bounds = await getEmbedWindowBounds(els.syncEmbedSlot);
     return await fn(bounds);
   } finally {
-    overlay.hidden = true;
+    hideChatEmbed();
   }
 }
 
 let pendingPlatform = null;
-/** 右键「切换分组」时要改的账号 id；与 pendingPlatform 互斥 */
-let pendingMoveAccountId = null;
-let contextMenuAccountId = null;
+/** 弹窗内选择的平台（从分组加号进入时用） */
+let dialogPlatform = null;
+/** 标题栏加号：仅新建项目分组 */
+let pendingCreateGroup = false;
+/** 右键重命名时的原分组名 */
+let pendingRenameGroup = null;
+/** 右键「切换分组」时要改的账号 id 列表 */
+let pendingMoveAccountIds = [];
+let contextMenuAccountIds = [];
+let contextMenuGroupName = null;
+/** 分组加号环形选平台时的目标分组 */
+let pendingAddGroup = null;
 
-function askConfirm(message, { title = '确认' } = {}) {
+const CUSTOM_GROUPS_KEY = 'aom-custom-groups';
+
+function loadCustomGroups() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_GROUPS_KEY);
+    const arr = JSON.parse(raw || '[]');
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.map((x) => String(x).trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCustomGroups() {
+  localStorage.setItem(CUSTOM_GROUPS_KEY, JSON.stringify([...customGroups]));
+}
+
+function addCustomGroup(name) {
+  const g = normalizeGroupName(name);
+  if (!g || g === '未分组') return '';
+  customGroups.add(g);
+  saveCustomGroups();
+  return g;
+}
+
+function removeCustomGroup(name) {
+  const g = normalizeGroupName(name);
+  if (!g || g === '未分组') return;
+  customGroups.delete(g);
+  saveCustomGroups();
+}
+
+function isEditableGroup(name) {
+  const g = normalizeGroupName(name);
+  return Boolean(g) && g !== '未分组';
+}
+
+async function setAccountsGroupLabel(fromLabel, toLabel) {
+  const from = normalizeGroupName(fromLabel);
+  const to = normalizeGroupName(toLabel) || '未分组';
+  const targets = accounts.filter((a) => normalizeGroupName(a.label) === from);
+  for (const a of targets) {
+    await api(`/api/accounts/${a.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ label: to }),
+    });
+  }
+  return targets.length;
+}
+
+let customGroups = loadCustomGroups();
+
+const PLATFORM_OPTIONS = [
+  'tiktok',
+  'facebook',
+  'youtube',
+  'instagram',
+  'pinterest',
+  'threads',
+];
+
+/** 与顶部 brand-hex 相同的环形顺序 */
+const PLATFORM_ORBIT_ORDER = [
+  'youtube',
+  'tiktok',
+  'instagram',
+  'threads',
+  'pinterest',
+  'facebook',
+];
+
+function askConfirm(message, { title = '确认', anchor } = {}) {
   return new Promise((resolve) => {
     if (!els.confirmDialog) {
       resolve(window.confirm(message));
       return;
     }
     if (els.confirmDialogTitle) els.confirmDialogTitle.textContent = title;
-    if (els.confirmDialogMessage) els.confirmDialogMessage.textContent = message;
+    if (els.confirmDialogMessage) {
+      // 支持 **加粗** 与换行
+      els.confirmDialogMessage.innerHTML = escapeHtml(message)
+        .replaceAll('\n', '<br>')
+        .replaceAll(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    }
     els.confirmDialog.returnValue = '';
     const onClose = () => {
       els.confirmDialog.removeEventListener('close', onClose);
+      clearAnchoredDialog(els.confirmDialog);
       resolve(els.confirmDialog.returnValue === 'confirm');
     };
     els.confirmDialog.addEventListener('close', onClose);
     els.confirmDialog.showModal();
+    positionAnchoredDialog(els.confirmDialog, anchor);
   });
 }
 
@@ -144,10 +299,41 @@ let currentConversationId = null;
 let selectedPlatform = null;
 /** null = 全部分组 */
 let selectedGroup = null;
-/** null = 当前可见范围内全部账号 */
+/** 主选账号（会话列表焦点）；null = 未点选具体账号 */
 let selectedAccountId = null;
+/** 多选账号（Ctrl / Shift）；批量操作以此为准 */
+let selectedAccountIds = new Set();
+/** Shift 连选锚点 */
+let lastAccountClickId = null;
+/** 账号列表画框多选 */
+let accountPointerSelect = null;
+let suppressAccountClick = false;
+const ACCOUNT_MARQUEE_THRESHOLD = 5;
 let loginPollTimer = null;
 let loginAccountId = null;
+/** @type {ReturnType<typeof setTimeout>[]} */
+let loginRedockTimers = [];
+
+function clearLoginRedockTimers() {
+  for (const t of loginRedockTimers) clearTimeout(t);
+  loginRedockTimers = [];
+}
+
+function scheduleLoginRedock(accountId) {
+  clearLoginRedockTimers();
+  for (const delay of [300, 800, 1600]) {
+    const t = setTimeout(async () => {
+      if (loginAccountId !== accountId || !isChatEmbedOpen()) return;
+      const bounds = await getEmbedWindowBounds(els.syncEmbedSlot);
+      if (!bounds || loginAccountId !== accountId) return;
+      await api(`/api/accounts/${accountId}/login/bounds`, {
+        method: 'POST',
+        body: JSON.stringify({ windowBounds: bounds }),
+      }).catch(() => {});
+    }, delay);
+    loginRedockTimers.push(t);
+  }
+}
 
 async function api(url, options) {
   const res = await fetch(url, {
@@ -280,7 +466,7 @@ function normalizeGroupName(label) {
 }
 
 function existingGroups() {
-  const set = new Set();
+  const set = new Set(customGroups);
   for (const a of accounts) {
     const g = normalizeGroupName(a.label);
     if (g !== '未分组') set.add(g);
@@ -302,14 +488,33 @@ function visibleAccounts() {
   return list;
 }
 
+function clearAccountSelection() {
+  selectedAccountId = null;
+  selectedAccountIds = new Set();
+  lastAccountClickId = null;
+}
+
+function getSelectedAccountIds() {
+  return [...selectedAccountIds];
+}
+
 function pruneSelection() {
-  const byPlatform = accountsForPlatform();
-  if (selectedGroup && !byPlatform.some((a) => normalizeGroupName(a.label) === selectedGroup)) {
-    selectedGroup = null;
+  // 空分组（0 账号）仍可选；仅当分组已不在列表中时才清掉
+  if (selectedGroup) {
+    const { names } = groupStats();
+    if (!names.includes(selectedGroup)) {
+      selectedGroup = null;
+    }
   }
-  const visible = visibleAccounts();
-  if (selectedAccountId && !visible.some((a) => a.id === selectedAccountId)) {
+  const visibleIds = new Set(visibleAccounts().map((a) => a.id));
+  selectedAccountIds = new Set([...selectedAccountIds].filter((id) => visibleIds.has(id)));
+  if (selectedAccountId && !visibleIds.has(selectedAccountId)) {
+    selectedAccountId = selectedAccountIds.size ? [...selectedAccountIds].at(-1) : null;
+  }
+  if (!selectedAccountIds.size) {
     selectedAccountId = null;
+  } else if (!selectedAccountIds.has(selectedAccountId)) {
+    selectedAccountId = [...selectedAccountIds].at(-1);
   }
 }
 
@@ -317,7 +522,13 @@ function renderAccountItem(a) {
   const name = a.displayName || a.username || '未命名';
   const plat = a.platform || 'tiktok';
   const group = normalizeGroupName(a.label);
-  const active = a.id === selectedAccountId ? ' active' : '';
+  const active = selectedAccountIds.has(a.id) ? ' active' : '';
+  const hasProxy = Boolean(a.proxyServer);
+  const region = String(a.proxyRegion || '').trim();
+  const proxyTitle = hasProxy
+    ? escapeHtml([region, a.proxyServer].filter(Boolean).join(' · '))
+    : '';
+  const proxyLabel = region || '代理';
   return `
     <li class="account-item${active}" data-id="${a.id}">
       ${avatarHtml(a.avatarUrl, name, '', a.updatedAt || a.id)}
@@ -328,6 +539,11 @@ function renderAccountItem(a) {
         </div>
         <div class="account-meta">
           <span class="account-group">${escapeHtml(group)}</span>
+          ${
+            hasProxy
+              ? `<span class="proxy-tag" title="${proxyTitle}">${escapeHtml(proxyLabel)}</span>`
+              : ''
+          }
           <span class="badge ${a.status}">${statusLabel(a.status, plat)}</span>
         </div>
       </div>
@@ -349,7 +565,7 @@ function renderPlatformFilter() {
   const accountPlat = selectedAccountPlatform();
   hex.classList.toggle('is-filtered', filtered);
   hex.querySelectorAll('.hex-icon[data-platform]').forEach((btn) => {
-    // 选平台 → 筛选高亮；选账号 → 同款高亮，其它 logo 不变
+    // 选平台 → 筛选高亮；选账号 → 同款高亮，其余 logo 不变
     const on =
       btn.dataset.platform === selectedPlatform ||
       (!filtered && Boolean(accountPlat) && btn.dataset.platform === accountPlat);
@@ -385,6 +601,9 @@ function groupStats() {
     const g = normalizeGroupName(a.label);
     map.set(g, (map.get(g) || 0) + 1);
   }
+  for (const g of customGroups) {
+    if (!map.has(g)) map.set(g, 0);
+  }
   const names = [...map.keys()].sort((a, b) => {
     if (a === '未分组') return 1;
     if (b === '未分组') return -1;
@@ -396,15 +615,15 @@ function groupStats() {
 function renderGroups() {
   if (!els.groupList) return;
   const { total, names, map } = groupStats();
-  if (!accounts.length) {
-    els.groupList.innerHTML = '<li class="empty">还没有分组</li>';
+  if (!accounts.length && !customGroups.size) {
+    els.groupList.innerHTML = '<li class="empty">还没有分组，点标题旁加号创建</li>';
     return;
   }
 
   const items = [
     {
       key: '',
-      name: selectedPlatform ? `全部 ${platformLabel(selectedPlatform)}` : '全部分组',
+      name: selectedPlatform ? platformLabel(selectedPlatform) : 'ALL',
       count: total,
       active: !selectedGroup,
     },
@@ -416,18 +635,33 @@ function renderGroups() {
     })),
   ];
 
+  const addSvg = `<svg class="brand-add-svg" viewBox="0 0 512 512" aria-hidden="true" focusable="false">
+      <path fill="url(#aomGroupAddOuter)" fill-rule="evenodd" d="M256 56c110.5 0 200 89.5 200 200s-89.5 200-200 200S56 366.5 56 256 145.5 56 256 56zm0 52c-81.7 0-148 66.3-148 148s66.3 148 148 148 148-66.3 148-148-66.3-148-148-148z"/>
+      <path fill="url(#aomGroupAddInner)" d="M351.604 234.755h-63.736c-5.867 0-10.623-4.756-10.623-10.623v-63.736c0-11.714-9.531-21.245-21.245-21.245s-21.245 9.531-21.245 21.245v63.736c0 5.867-4.756 10.623-10.623 10.623h-63.736c-11.714 0-21.245 9.531-21.245 21.245s9.531 21.245 21.245 21.245h63.736c5.867 0 10.623 4.756 10.623 10.623v63.736c0 11.714 9.531 21.245 21.245 21.245s21.245-9.531 21.245-21.245v-63.736c0-5.867 4.756-10.623 10.623-10.623h63.736c11.714 0 21.245-9.531 21.245-21.245s-9.531-21.245-21.245-21.245z"/>
+    </svg>`;
+
   els.groupList.innerHTML = items
-    .map(
-      (g) => `
-    <li>
+    .map((g) => {
+      const addBtn = g.key
+        ? `<button type="button" class="group-add-btn group-row-add" data-add-group="${escapeHtml(
+            g.key
+          )}" aria-label="${escapeHtml(`添加账号到「${g.name}」`)}" title="${escapeHtml(
+            `添加账号到「${g.name}」`
+          )}">
+        ${addSvg}
+      </button>`
+        : `<span class="group-row-add-spacer" aria-hidden="true"></span>`;
+      return `
+    <li class="group-row">
       <button type="button" class="group-item${g.active ? ' active' : ''}" data-group="${escapeHtml(
         g.key
       )}">
         <span class="group-item-name">${escapeHtml(g.name)}</span>
         <span class="group-item-count">${g.count}</span>
       </button>
-    </li>`
-    )
+      ${addBtn}
+    </li>`;
+    })
     .join('');
 }
 
@@ -450,12 +684,13 @@ function renderAccounts() {
 }
 
 async function refreshConversations() {
-  const q = selectedAccountId
-    ? `?accountId=${encodeURIComponent(selectedAccountId)}`
-    : '';
-  let list = await api(`/api/conversations${q}`);
-  if (!selectedAccountId) {
-    const ids = new Set(visibleAccounts().map((a) => a.id));
+  const selected = getSelectedAccountIds();
+  let list;
+  if (selected.length === 1) {
+    list = await api(`/api/conversations?accountId=${encodeURIComponent(selected[0])}`);
+  } else {
+    list = await api('/api/conversations');
+    const ids = new Set(selected.length ? selected : visibleAccounts().map((a) => a.id));
     list = list.filter((c) => ids.has(c.accountId));
   }
   conversations = list;
@@ -467,7 +702,7 @@ async function refreshConversations() {
 
 async function setPlatformFilter(platform) {
   selectedPlatform = selectedPlatform === platform ? null : platform;
-  selectedAccountId = null;
+  clearAccountSelection();
   pruneSelection();
   renderPlatformFilter();
   renderGroups();
@@ -477,7 +712,7 @@ async function setPlatformFilter(platform) {
 
 async function setGroupFilter(group) {
   selectedGroup = group || null;
-  selectedAccountId = null;
+  clearAccountSelection();
   pruneSelection();
   renderGroups();
   renderAccounts();
@@ -485,8 +720,39 @@ async function setGroupFilter(group) {
   await refreshConversations();
 }
 
-async function setAccountFilter(accountId) {
-  selectedAccountId = selectedAccountId === accountId ? null : accountId;
+async function setAccountFilter(accountId, { multi = false, range = false } = {}) {
+  const visible = visibleAccounts();
+  const ids = visible.map((a) => a.id);
+  if (!ids.includes(accountId)) return;
+
+  if (range && lastAccountClickId && ids.includes(lastAccountClickId)) {
+    const i0 = ids.indexOf(lastAccountClickId);
+    const i1 = ids.indexOf(accountId);
+    const [lo, hi] = i0 < i1 ? [i0, i1] : [i1, i0];
+    if (!multi) selectedAccountIds = new Set();
+    for (let i = lo; i <= hi; i++) selectedAccountIds.add(ids[i]);
+    selectedAccountId = accountId;
+  } else if (multi) {
+    if (selectedAccountIds.has(accountId)) {
+      selectedAccountIds.delete(accountId);
+      if (selectedAccountId === accountId) {
+        selectedAccountId = selectedAccountIds.size ? [...selectedAccountIds].at(-1) : null;
+      }
+    } else {
+      selectedAccountIds.add(accountId);
+      selectedAccountId = accountId;
+    }
+    lastAccountClickId = accountId;
+  } else if (selectedAccountIds.size === 1 && selectedAccountIds.has(accountId)) {
+    clearAccountSelection();
+  } else {
+    selectedAccountIds = new Set([accountId]);
+    selectedAccountId = accountId;
+    lastAccountClickId = accountId;
+  }
+
+  if (range) lastAccountClickId = accountId;
+
   renderAccounts();
   renderPlatformFilter();
   await refreshConversations();
@@ -495,7 +761,7 @@ async function setAccountFilter(accountId) {
 function renderConversations() {
   if (!conversations.length) {
     els.conversationList.innerHTML =
-      '<li class="empty">暂无会话。先登录账号，再点中间 AOM 同步</li>';
+      '<li class="empty">暂无会话。先登录账号，再点中央 AOM 同步</li>';
     return;
   }
 
@@ -536,12 +802,12 @@ async function openConversation(id) {
     : '';
   els.chatTitle.textContent = name || '会话';
   els.chatSub.textContent = conv
-    ? `来自：${
+    ? `来自「${
         conv.accountDisplayName ||
         conv.accountUsername ||
         conv.accountLabel ||
         conv.accountId
-      }`
+      }」`
     : '';
   fillAvatarEl(els.chatAvatar, conv?.peerAvatar, name);
   els.replyForm.hidden = false;
@@ -564,10 +830,17 @@ async function openConversation(id) {
 
 let loginSucceeded = false;
 
-function applyLoginDialogCopy(platform) {
+function applyLoginEmbedCopy(platform, statusText) {
   const isFb = platform === 'facebook';
-  if (els.loginDialogTitle) {
-    els.loginDialogTitle.textContent = isFb ? 'Facebook 登录' : '扫码登录';
+  if (els.syncEmbedTitle) {
+    els.syncEmbedTitle.textContent = isFb ? 'Facebook 登录' : '扫码登录';
+  }
+  if (els.syncEmbedStatus) {
+    els.syncEmbedStatus.textContent =
+      statusText ||
+      (isFb
+        ? '请在右侧浏览器窗口中完成 Facebook 登录（账密 / 二次验证）'
+        : '请使用 TikTok App 扫描弹出的浏览器窗口');
   }
   if (els.qrPlaceholder) {
     els.qrPlaceholder.textContent = isFb
@@ -579,55 +852,63 @@ function applyLoginDialogCopy(platform) {
 async function startLogin(accountId) {
   loginAccountId = accountId;
   loginSucceeded = false;
+  clearLoginRedockTimers();
   const account = accounts.find((a) => a.id === accountId);
   const platform = account?.platform || 'tiktok';
-  applyLoginDialogCopy(platform);
-  els.loginStatusText.textContent = '正在启动…';
-  els.qrImage.removeAttribute('src');
-  els.qrImage.hidden = true;
-  if (els.qrPlaceholder) els.qrPlaceholder.hidden = false;
-  els.loginDialog.showModal();
+  showChatEmbed({
+    title: platform === 'facebook' ? 'Facebook 登录' : '扫码登录',
+    status: '正在启动',
+    showCancel: true,
+  });
+  applyLoginEmbedCopy(platform, '正在启动');
 
-  const windowBounds = await getEmbedWindowBounds(els.loginEmbedSlot);
+  const windowBounds = await getEmbedWindowBounds(els.syncEmbedSlot);
 
   // 接口立刻返回，不再干等浏览器启动
   const result = await api(`/api/accounts/${accountId}/login`, {
     method: 'POST',
     body: JSON.stringify({ windowBounds }),
   });
-  if (result.platform) applyLoginDialogCopy(result.platform);
-  els.loginStatusText.textContent = result.message || '正在启动浏览器…';
+  if (result.platform) applyLoginEmbedCopy(result.platform, result.message);
+  else applyLoginEmbedCopy(platform, result.message || '正在启动浏览器');
   setQrPreview(result.screenshot);
+  scheduleLoginRedock(accountId);
 
   clearInterval(loginPollTimer);
   const poll = async () => {
     try {
       const st = await api(`/api/accounts/${accountId}/login/status`);
-      if (st.platform) applyLoginDialogCopy(st.platform);
-      if (st.message) els.loginStatusText.textContent = st.message;
+      const p = st.platform || platform;
+      if (st.message) applyLoginEmbedCopy(p, st.message);
+      else applyLoginEmbedCopy(p);
       setQrPreview(st.screenshot);
 
       if (st.status === 'logged_in') {
         clearInterval(loginPollTimer);
+        clearLoginRedockTimers();
         loginSucceeded = true;
         const who = st.profile?.displayName || st.profile?.username || '';
-        els.loginStatusText.textContent = who ? `登录成功：${who}` : '登录成功';
+        applyLoginEmbedCopy(p, who ? `登录成功：${who}` : '登录成功');
         setTimeout(() => {
-          els.loginDialog.close();
+          hideChatEmbed();
+          loginAccountId = null;
           refreshAccounts();
         }, 600);
       } else if (st.status === 'expired' || st.status === 'error') {
         clearInterval(loginPollTimer);
-        els.loginStatusText.textContent =
+        clearLoginRedockTimers();
+        applyLoginEmbedCopy(
+          p,
           st.message ||
-          (st.status === 'expired'
-            ? platform === 'facebook'
-              ? '登录超时，请重试'
-              : '二维码已过期，请重新扫码'
-            : '登录失败');
+            (st.status === 'expired'
+              ? p === 'facebook'
+                ? '登录超时，请重试'
+                : '二维码已过期，请重新扫码'
+              : '登录失败')
+        );
       }
     } catch (e) {
-      els.loginStatusText.textContent = e.message;
+      applyLoginEmbedCopy(platform, e.message);
     }
   };
   await poll();
@@ -636,8 +917,10 @@ async function startLogin(accountId) {
 
 async function cancelLogin() {
   clearInterval(loginPollTimer);
+  clearLoginRedockTimers();
   const id = loginAccountId;
   loginAccountId = null;
+  hideChatEmbed();
   if (id && !loginSucceeded) {
     await api(`/api/accounts/${id}/login/cancel`, { method: 'POST' }).catch(() => {});
   }
@@ -652,20 +935,59 @@ function escapeHtml(str) {
     .replaceAll('"', '&quot;');
 }
 
-function clearGroupDialogAnchor() {
-  const dialog = els.groupDialog;
+function clearAnchoredDialog(dialog) {
   if (!dialog) return;
-  dialog.classList.remove('dialog-anchored');
+  dialog.classList.remove('dialog-anchored', 'is-closing');
   dialog.style.left = '';
   dialog.style.top = '';
+  dialog.style.removeProperty('--dialog-origin');
+  delete dialog.dataset.closing;
 }
 
-function positionGroupDialog(anchorEl) {
-  const dialog = els.groupDialog;
+function clearGroupDialogAnchor() {
+  clearAnchoredDialog(els.groupDialog);
+}
+
+function closeAnchoredDialogAnimated(dialog, returnValue = 'cancel') {
+  if (!dialog?.open) return;
+  if (dialog.dataset.closing === '1') return;
+
+  const reduceMotion =
+    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduceMotion || !dialog.classList.contains('dialog-anchored')) {
+    dialog.close(returnValue);
+    return;
+  }
+
+  dialog.dataset.closing = '1';
+  dialog.classList.add('is-closing');
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    dialog.classList.remove('is-closing');
+    delete dialog.dataset.closing;
+    if (dialog.open) dialog.close(returnValue);
+  };
+  dialog.addEventListener(
+    'animationend',
+    (e) => {
+      if (e.target === dialog) finish();
+    },
+    { once: true }
+  );
+  setTimeout(finish, 220);
+}
+
+function closeGroupDialogAnimated(returnValue = 'cancel') {
+  closeAnchoredDialogAnimated(els.groupDialog, returnValue);
+}
+
+function positionAnchoredDialog(dialog, anchorEl) {
   if (!dialog) return;
   const anchor = anchorEl && !anchorEl.hidden ? anchorEl : null;
   if (!anchor) {
-    clearGroupDialogAnchor();
+    clearAnchoredDialog(dialog);
     return;
   }
 
@@ -673,15 +995,22 @@ function positionGroupDialog(anchorEl) {
   const place = () => {
     const a = anchor.getBoundingClientRect();
     const d = dialog.getBoundingClientRect();
-    const gap = 10;
-    const pad = 8;
+    const gap = 12;
+    const pad = 10;
     let left = a.right + gap;
-    let top = a.top + a.height / 2 - d.height / 2;
+    let originX = '0%';
     if (left + d.width > window.innerWidth - pad) {
       left = Math.max(pad, a.left - d.width - gap);
+      originX = '100%';
     }
+    let top = a.top + a.height / 2 - d.height / 2;
     top = Math.max(pad, Math.min(top, window.innerHeight - d.height - pad));
     left = Math.max(pad, left);
+    const originY = `${Math.max(
+      12,
+      Math.min(88, ((a.top + a.height / 2 - top) / Math.max(d.height, 1)) * 100)
+    )}%`;
+    dialog.style.setProperty('--dialog-origin', `${originX} ${originY}`);
     dialog.style.left = `${Math.round(left)}px`;
     dialog.style.top = `${Math.round(top)}px`;
   };
@@ -689,71 +1018,338 @@ function positionGroupDialog(anchorEl) {
   requestAnimationFrame(() => requestAnimationFrame(place));
 }
 
-function fillGroupDialog({ hint, initialGroup, anchor } = {}) {
-  if (els.groupDialogHint && hint) {
-    els.groupDialogHint.textContent = hint;
+function positionGroupDialog(anchorEl) {
+  positionAnchoredDialog(els.groupDialog, anchorEl);
+}
+
+function renderPlatformChips(activePlatform) {
+  if (!els.platformChips) return;
+  els.platformChips.innerHTML = PLATFORM_OPTIONS.map((id) => {
+    const addable = ADDABLE_PLATFORMS.has(id);
+    const active = id === activePlatform ? ' active' : '';
+    const disabled = addable ? '' : ' disabled';
+    const title = addable ? platformLabel(id) : `${platformLabel(id)} 即将支持`;
+    return `<button type="button" class="group-chip${active}" data-platform="${escapeHtml(
+      id
+    )}" title="${escapeHtml(title)}"${disabled}>
+      <img src="/icons/${escapeHtml(id)}.svg" alt="" />
+      <span>${escapeHtml(platformLabel(id))}</span>
+    </button>`;
+  }).join('');
+}
+
+function syncPlatformChipActive(platform) {
+  els.platformChips?.querySelectorAll('.group-chip[data-platform]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.platform === platform);
+  });
+}
+
+function fillGroupDialog({
+  title,
+  hint,
+  initialGroup,
+  anchor,
+  showPlatform = false,
+  createGroupOnly = false,
+  renameGroupOnly = false,
+  platformOnly = false,
+} = {}) {
+  const nameOnly = createGroupOnly || renameGroupOnly;
+  if (els.groupDialogTitle) {
+    els.groupDialogTitle.textContent =
+      title ||
+      (renameGroupOnly
+        ? '重命名分组'
+        : createGroupOnly
+          ? '新建项目分组'
+          : showPlatform
+            ? '添加账号'
+            : '选择分组');
   }
+  if (els.groupDialogHint) {
+    if (hint) {
+      els.groupDialogHint.hidden = false;
+      els.groupDialogHint.textContent = hint;
+    } else {
+      els.groupDialogHint.hidden = true;
+      els.groupDialogHint.textContent = '';
+    }
+  }
+  if (els.platformPicker) {
+    els.platformPicker.hidden = !showPlatform;
+  }
+  if (els.groupPicker) {
+    els.groupPicker.hidden = nameOnly || platformOnly;
+  }
+  if (els.groupInputField) {
+    els.groupInputField.hidden = platformOnly;
+  }
+  if (els.groupInputLabel) {
+    els.groupInputLabel.textContent = nameOnly ? '分组名称' : '或输入新分组';
+  }
+  if (showPlatform) {
+    dialogPlatform =
+      selectedPlatform && ADDABLE_PLATFORMS.has(selectedPlatform) ? selectedPlatform : null;
+    renderPlatformChips(dialogPlatform);
+  } else {
+    dialogPlatform = null;
+  }
+
   const groups = existingGroups();
+  const chipGroups = ['未分组', ...groups];
   if (els.groupChips) {
-    els.groupChips.innerHTML = groups.length
-      ? groups
-          .map(
-            (g) =>
-              `<button type="button" class="group-chip" data-group="${escapeHtml(g)}">${escapeHtml(
-                g
-              )}</button>`
-          )
-          .join('')
-      : '<span class="group-chip-empty">暂无分组，直接输入新名称</span>';
+    els.groupChips.innerHTML = chipGroups
+      .map(
+        (g) =>
+          `<button type="button" class="group-chip" data-group="${escapeHtml(g)}">${escapeHtml(
+            g
+          )}</button>`
+      )
+      .join('');
   }
   if (els.groupInput) {
-    const fallback =
-      selectedGroup && selectedGroup !== '未分组' ? selectedGroup : groups[0] || '';
-    els.groupInput.value = initialGroup ?? fallback;
+    if (renameGroupOnly) {
+      els.groupInput.value = initialGroup || '';
+      els.groupInput.placeholder = '输入新的分组名称';
+      queueMicrotask(() => {
+        els.groupInput?.select();
+      });
+    } else if (createGroupOnly) {
+      els.groupInput.value = '';
+      els.groupInput.placeholder = '如：人造草 / 客服组 / 店铺A';
+    } else if (platformOnly) {
+      els.groupInput.value = initialGroup || '未分组';
+    } else {
+      const fallback = selectedGroup || groups[0] || '未分组';
+      els.groupInput.value = initialGroup ?? fallback;
+      els.groupInput.placeholder = '如：客服组 / 主号 / 店铺A';
+    }
     syncGroupChipActive(els.groupInput.value);
   }
   els.groupDialog.returnValue = '';
   els.groupDialog.showModal();
   positionGroupDialog(anchor);
-  queueMicrotask(() => els.groupInput?.focus());
-}
-
-function openGroupDialog(platform) {
-  pendingPlatform = platform;
-  pendingMoveAccountId = null;
-  const platName = platformLabel(platform);
-  fillGroupDialog({
-    hint: `把这个 ${platName} 账号归到哪个分组？`,
-    anchor: els.btnBrandAdd,
+  queueMicrotask(() => {
+    if (showPlatform) {
+      els.platformChips?.querySelector('.group-chip.active, .group-chip:not([disabled])')?.focus();
+    } else {
+      els.groupInput?.focus();
+    }
   });
 }
 
-function openMoveGroupDialog(accountId) {
-  const account = accounts.find((a) => a.id === accountId);
+function openGroupDialog(platform, { anchor, initialGroup } = {}) {
+  pendingPlatform = platform;
+  pendingMoveAccountIds = [];
+  pendingCreateGroup = false;
+  pendingRenameGroup = null;
+  fillGroupDialog({
+    title: '选择分组',
+    hint: '',
+    initialGroup,
+    anchor: anchor || els.btnBrandAdd,
+    showPlatform: false,
+    createGroupOnly: false,
+  });
+}
+
+function openCreateGroupDialog() {
+  pendingPlatform = null;
+  pendingMoveAccountIds = [];
+  dialogPlatform = null;
+  pendingCreateGroup = true;
+  pendingRenameGroup = null;
+  fillGroupDialog({
+    title: '新建项目分组',
+    hint: '',
+    initialGroup: '',
+    anchor: els.btnGroupAdd,
+    showPlatform: false,
+    createGroupOnly: true,
+  });
+}
+
+function openRenameGroupDialog(groupName, anchor) {
+  const oldName = normalizeGroupName(groupName);
+  if (!isEditableGroup(oldName)) return;
+  pendingPlatform = null;
+  pendingMoveAccountIds = [];
+  dialogPlatform = null;
+  pendingCreateGroup = false;
+  pendingRenameGroup = oldName;
+  const item = els.groupList?.querySelector(
+    `.group-item[data-group="${CSS.escape(oldName)}"]`
+  );
+  fillGroupDialog({
+    title: `重命名 · ${oldName}`,
+    hint: '',
+    initialGroup: oldName,
+    anchor: anchor || item || els.btnGroupAdd,
+    showPlatform: false,
+    renameGroupOnly: true,
+  });
+}
+
+function renderGroupPlatformOrbit() {
+  if (!els.groupPlatformOrbit) return;
+  els.groupPlatformOrbit.innerHTML = PLATFORM_ORBIT_ORDER.map((id, i) => {
+    const addable = ADDABLE_PLATFORMS.has(id);
+    const title = addable ? platformLabel(id) : `${platformLabel(id)} 即将支持`;
+    const disabled = addable ? '' : ' disabled';
+    const disabledClass = addable ? '' : ' is-disabled';
+    return `<button type="button" class="hex-icon${disabledClass}" style="--i: ${i}" data-platform="${escapeHtml(
+      id
+    )}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" role="menuitem"${disabled}>
+      <img src="/icons/${escapeHtml(id)}.svg" alt="" />
+    </button>`;
+  }).join('');
+}
+
+function showGroupPlatformPicker(groupName, anchor) {
+  const group = normalizeGroupName(groupName) || '未分组';
+  const picker = els.groupPlatformPicker;
+  const orbit = els.groupPlatformOrbit;
+  if (!picker || !orbit || !anchor) return;
+
+  const isVisible = !picker.hidden && !picker.classList.contains('is-closing');
+  const sameOpen = isVisible && pendingAddGroup === group && anchor.classList.contains('is-picking');
+  hideAccountContextMenu();
+  hideGroupContextMenu();
+  if (sameOpen) {
+    hideGroupPlatformPicker();
+    return;
+  }
+
+  window.clearTimeout(groupPlatformPickerHideTimer);
+  groupPlatformPickerHideTimer = 0;
+  document.querySelectorAll('.group-add-btn.is-picking').forEach((btn) => {
+    btn.classList.remove('is-picking');
+  });
+  picker.classList.remove('is-closing');
+
+  pendingAddGroup = group;
+  renderGroupPlatformOrbit();
+
+  const rect = anchor.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  orbit.style.left = `${cx}px`;
+  orbit.style.top = `${cy}px`;
+
+  anchor.classList.add('is-picking');
+  picker.hidden = false;
+  // 先落到收起态再展开，保证重开也有入场动效
+  picker.classList.remove('is-open');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (pendingAddGroup !== group || picker.hidden) return;
+      picker.classList.add('is-open');
+    });
+  });
+}
+
+async function addAccountToGroup(groupName, platform) {
+  const group = normalizeGroupName(groupName) || '未分组';
+  if (!platform || !ADDABLE_PLATFORMS.has(platform)) {
+    alert(`${platformLabel(platform)} 即将支持`);
+    return;
+  }
+  hideGroupPlatformPicker();
+  try {
+    addCustomGroup(group);
+    const account = await api('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({ label: group, platform }),
+    });
+    selectedGroup = group;
+    await refreshAccounts();
+    await startLogin(account.id);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function openMoveGroupDialog(accountIds) {
+  const ids = (Array.isArray(accountIds) ? accountIds : [accountIds]).filter(Boolean);
+  if (!ids.length) return;
+  const account = accounts.find((a) => a.id === ids[0]);
   if (!account) return;
   pendingPlatform = null;
-  pendingMoveAccountId = accountId;
-  const name = account.displayName || account.username || '未命名';
-  const item = els.accountList?.querySelector(`[data-id="${CSS.escape(accountId)}"]`);
+  dialogPlatform = null;
+  pendingCreateGroup = false;
+  pendingRenameGroup = null;
+  pendingMoveAccountIds = ids;
+  const title =
+    ids.length > 1
+      ? `切换分组 · ${ids.length} 个账号`
+      : `切换分组 · ${account.displayName || account.username || '未命名'}`;
+  const item = els.accountList?.querySelector(`[data-id="${CSS.escape(ids[0])}"]`);
   fillGroupDialog({
-    hint: `把「${name}」换到哪个分组？`,
+    title,
+    hint: '',
     initialGroup: normalizeGroupName(account.label),
     anchor: item || els.btnBrandAdd,
+    showPlatform: false,
+    createGroupOnly: false,
   });
 }
 
 function hideAccountContextMenu() {
-  contextMenuAccountId = null;
+  contextMenuAccountIds = [];
   if (els.accountContextMenu) els.accountContextMenu.hidden = true;
 }
 
-function showAccountContextMenu(account, x, y) {
-  const menu = els.accountContextMenu;
-  if (!menu || !account) return;
-  contextMenuAccountId = account.id;
-  const loginBtn = menu.querySelector('[data-ctx="login"]');
-  if (loginBtn) loginBtn.hidden = account.status === 'active';
+function hideGroupContextMenu() {
+  contextMenuGroupName = null;
+  if (els.groupContextMenu) els.groupContextMenu.hidden = true;
+}
 
+let groupPlatformPickerHideTimer = 0;
+
+function hideGroupPlatformPicker({ immediate = false } = {}) {
+  const picker = els.groupPlatformPicker;
+  pendingAddGroup = null;
+  document.querySelectorAll('.group-add-btn.is-picking').forEach((btn) => {
+    btn.classList.remove('is-picking');
+  });
+  if (!picker || picker.hidden) {
+    if (picker) {
+      picker.classList.remove('is-open', 'is-closing');
+    }
+    return;
+  }
+
+  window.clearTimeout(groupPlatformPickerHideTimer);
+
+  const finish = () => {
+    groupPlatformPickerHideTimer = 0;
+    picker.classList.remove('is-open', 'is-closing');
+    picker.hidden = true;
+  };
+
+  const reduceMotion =
+    immediate ||
+    window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+
+  if (reduceMotion || !picker.classList.contains('is-open')) {
+    finish();
+    return;
+  }
+
+  picker.classList.add('is-closing');
+  picker.classList.remove('is-open');
+  // 入场 stagger 约 5*28ms + 0.28s；出场反向约 5*24ms + 0.22s
+  groupPlatformPickerHideTimer = window.setTimeout(finish, 360);
+}
+
+function hideAllContextMenus() {
+  hideAccountContextMenu();
+  hideGroupContextMenu();
+  hideGroupPlatformPicker();
+}
+
+function placeContextMenu(menu, x, y) {
+  if (!menu) return;
   menu.hidden = false;
   const pad = 8;
   const rect = menu.getBoundingClientRect();
@@ -763,11 +1359,127 @@ function showAccountContextMenu(account, x, y) {
   menu.style.top = `${Math.max(pad, top)}px`;
 }
 
-async function deleteAccount(id) {
-  const ok = await askConfirm('确定删除该账号及其本地会话？', { title: '确认删除' });
+function showAccountContextMenu(accountIds, x, y) {
+  const menu = els.accountContextMenu;
+  const ids = (Array.isArray(accountIds) ? accountIds : [accountIds]).filter(Boolean);
+  if (!menu || !ids.length) return;
+  hideGroupContextMenu();
+  contextMenuAccountIds = ids;
+  const multi = ids.length > 1;
+  const account = accounts.find((a) => a.id === ids[0]);
+  const loginBtn = menu.querySelector('[data-ctx="login"]');
+  const proxyBtn = menu.querySelector('[data-ctx="proxy"]');
+  const moveBtn = menu.querySelector('[data-ctx="move"]');
+  const deleteBtn = menu.querySelector('[data-ctx="delete"]');
+  if (loginBtn) {
+    loginBtn.hidden = multi || account?.status === 'active';
+  }
+  if (proxyBtn) proxyBtn.hidden = multi;
+  if (moveBtn) moveBtn.textContent = multi ? `批量切换分组（${ids.length}）` : '切换分组';
+  if (deleteBtn) deleteBtn.textContent = multi ? `批量删除（${ids.length}）` : '删除';
+  placeContextMenu(menu, x, y);
+}
+
+let proxyEditAccountId = null;
+
+function openProxyDialog(accountId) {
+  const account = accounts.find((a) => a.id === accountId);
+  if (!account || !els.proxyDialog) return;
+  proxyEditAccountId = accountId;
+  if (els.proxyRegion) els.proxyRegion.value = account.proxyRegion || '';
+  if (els.proxyServer) els.proxyServer.value = account.proxyServer || '';
+  if (els.proxyUsername) els.proxyUsername.value = account.proxyUsername || '';
+  if (els.proxyPassword) els.proxyPassword.value = account.proxyPassword || '';
+  els.proxyDialog.showModal();
+  els.proxyServer?.focus();
+}
+
+async function saveAccountProxy({ clear = false } = {}) {
+  const id = proxyEditAccountId;
+  if (!id) return;
+  const body = clear
+    ? { server: '', username: '', password: '', region: '' }
+    : {
+        server: els.proxyServer?.value?.trim() || '',
+        username: els.proxyUsername?.value?.trim() || '',
+        password: els.proxyPassword?.value ?? '',
+        region: els.proxyRegion?.value || '',
+      };
+  await api(`/api/accounts/${id}/proxy`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  proxyEditAccountId = null;
+  els.proxyDialog?.close();
+  await refreshAccounts();
+}
+
+function showGroupContextMenu(groupName, x, y) {
+  const menu = els.groupContextMenu;
+  const name = normalizeGroupName(groupName);
+  if (!menu || !isEditableGroup(name)) return;
+  hideAccountContextMenu();
+  contextMenuGroupName = name;
+  placeContextMenu(menu, x, y);
+}
+
+async function renameProjectGroup(oldName, newName) {
+  const from = normalizeGroupName(oldName);
+  const to = normalizeGroupName(newName);
+  if (!isEditableGroup(from)) return;
+  if (!to || to === '未分组') {
+    alert('请输入有效的分组名称');
+    return;
+  }
+  if (from === to) return;
+
+  removeCustomGroup(from);
+  addCustomGroup(to);
+  await setAccountsGroupLabel(from, to);
+  if (selectedGroup === from) selectedGroup = to;
+  await refreshAccounts();
+}
+
+async function deleteProjectGroup(groupName, { anchor } = {}) {
+  const name = normalizeGroupName(groupName);
+  if (!isEditableGroup(name)) return;
+
+  const count = accounts.filter((a) => normalizeGroupName(a.label) === name).length;
+  const msg =
+    count > 0
+      ? `确定删除分组「${name}」？\n其中 **${count}** 个账号将移到「未分组」。`
+      : `确定删除分组「${name}」？`;
+  const row =
+    anchor ||
+    els.groupList?.querySelector(`.group-item[data-group="${CSS.escape(name)}"]`);
+  const ok = await askConfirm(msg, { title: '删除分组', anchor: row });
   if (!ok) return;
-  await api(`/api/accounts/${id}`, { method: 'DELETE' });
-  if (selectedAccountId === id) selectedAccountId = null;
+
+  removeCustomGroup(name);
+  if (count > 0) await setAccountsGroupLabel(name, '未分组');
+  if (selectedGroup === name) selectedGroup = null;
+  await refreshAccounts();
+}
+
+async function deleteAccounts(accountIds, { anchor } = {}) {
+  const ids = (Array.isArray(accountIds) ? accountIds : [accountIds]).filter(Boolean);
+  if (!ids.length) return;
+  const msg =
+    ids.length > 1
+      ? `确定删除选中的 **${ids.length}** 个账号及其本地会话？`
+      : '确定删除该账号及其本地会话？';
+  const row =
+    anchor ||
+    els.accountList?.querySelector(`[data-id="${CSS.escape(ids[0])}"]`);
+  const ok = await askConfirm(msg, { title: '确认删除', anchor: row });
+  if (!ok) return;
+  for (const id of ids) {
+    await api(`/api/accounts/${id}`, { method: 'DELETE' });
+  }
+  for (const id of ids) selectedAccountIds.delete(id);
+  if (ids.includes(selectedAccountId)) {
+    selectedAccountId = selectedAccountIds.size ? [...selectedAccountIds].at(-1) : null;
+  }
   clearChatView();
   await refreshAccounts();
   await refreshConversations();
@@ -786,8 +1498,19 @@ els.btnBrandAdd?.addEventListener('click', () => {
   openGroupDialog(selectedPlatform);
 });
 
+els.btnGroupAdd?.addEventListener('click', () => {
+  openCreateGroupDialog();
+});
+
+els.platformChips?.addEventListener('click', (e) => {
+  const chip = e.target.closest('.group-chip[data-platform]');
+  if (!chip || chip.disabled) return;
+  dialogPlatform = chip.dataset.platform || null;
+  syncPlatformChipActive(dialogPlatform);
+});
+
 els.groupChips?.addEventListener('click', (e) => {
-  const chip = e.target.closest('.group-chip');
+  const chip = e.target.closest('.group-chip[data-group]');
   if (!chip) return;
   if (els.groupInput) els.groupInput.value = chip.dataset.group || '';
   syncGroupChipActive(els.groupInput?.value);
@@ -798,30 +1521,104 @@ els.groupInput?.addEventListener('input', () => {
   syncGroupChipActive(els.groupInput.value);
 });
 
-document.getElementById('btnCancelGroup')?.addEventListener('click', () => {
-  els.groupDialog.close('cancel');
+els.groupForm?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (pendingCreateGroup || pendingRenameGroup) {
+    const name = String(els.groupInput?.value || '').trim();
+    if (!name || name === '未分组') {
+      alert('请输入有效的分组名称');
+      return;
+    }
+    closeGroupDialogAnimated('confirm');
+    return;
+  }
+  const needPlatform = els.platformPicker && !els.platformPicker.hidden;
+  if (needPlatform) {
+    const platform = dialogPlatform || pendingPlatform;
+    if (!platform || !ADDABLE_PLATFORMS.has(platform)) {
+      alert('请先选择可添加的平台');
+      return;
+    }
+  }
+  closeGroupDialogAnimated('confirm');
+});
+
+els.groupDialog?.addEventListener('cancel', (e) => {
+  e.preventDefault();
+  closeGroupDialogAnimated('cancel');
+});
+
+els.groupDialog?.addEventListener('click', (e) => {
+  if (e.target === els.groupDialog) {
+    closeGroupDialogAnimated('cancel');
+  }
+});
+
+els.confirmDialog?.querySelector('form')?.addEventListener('submit', (e) => {
+  if (!els.confirmDialog?.classList.contains('dialog-anchored')) return;
+  e.preventDefault();
+  closeAnchoredDialogAnimated(els.confirmDialog, e.submitter?.value || 'cancel');
+});
+
+els.confirmDialog?.addEventListener('cancel', (e) => {
+  if (!els.confirmDialog?.classList.contains('dialog-anchored')) return;
+  e.preventDefault();
+  closeAnchoredDialogAnimated(els.confirmDialog, 'cancel');
+});
+
+els.confirmDialog?.addEventListener('click', (e) => {
+  if (e.target === els.confirmDialog) {
+    closeAnchoredDialogAnimated(els.confirmDialog, 'cancel');
+  }
 });
 
 els.groupDialog.addEventListener('close', async () => {
   clearGroupDialogAnchor();
   const action = els.groupDialog.returnValue;
-  const platform = pendingPlatform;
-  const moveId = pendingMoveAccountId;
+  const platform = pendingPlatform || dialogPlatform;
+  const moveIds = [...pendingMoveAccountIds];
+  const creatingGroup = pendingCreateGroup;
+  const renamingFrom = pendingRenameGroup;
   pendingPlatform = null;
-  pendingMoveAccountId = null;
+  dialogPlatform = null;
+  pendingMoveAccountIds = [];
+  pendingCreateGroup = false;
+  pendingRenameGroup = null;
+  if (els.platformPicker) els.platformPicker.hidden = true;
+  if (els.groupPicker) els.groupPicker.hidden = false;
+  if (els.groupInputField) els.groupInputField.hidden = false;
   if (action !== 'confirm') return;
 
   const group = String(els.groupInput?.value || '').trim() || '未分组';
   try {
-    if (moveId) {
-      await api(`/api/accounts/${moveId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ label: group }),
-      });
+    if (renamingFrom) {
+      await renameProjectGroup(renamingFrom, group);
+      return;
+    }
+    if (creatingGroup) {
+      const name = addCustomGroup(group);
+      if (!name) {
+        alert('请输入有效的分组名称');
+        return;
+      }
+      selectedGroup = name;
+      renderGroups();
+      renderAccounts();
+      return;
+    }
+    if (moveIds.length) {
+      addCustomGroup(group);
+      for (const id of moveIds) {
+        await api(`/api/accounts/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ label: group }),
+        });
+      }
       await refreshAccounts();
       return;
     }
-    if (!platform) return;
+    if (!platform || !ADDABLE_PLATFORMS.has(platform)) return;
+    addCustomGroup(group);
     const account = await api('/api/accounts', {
       method: 'POST',
       body: JSON.stringify({ label: group, platform }),
@@ -834,65 +1631,261 @@ els.groupDialog.addEventListener('close', async () => {
 });
 
 els.groupList?.addEventListener('click', (e) => {
+  const addBtn = e.target.closest('[data-add-group]');
+  if (addBtn) {
+    e.stopPropagation();
+    showGroupPlatformPicker(addBtn.dataset.addGroup || '', addBtn);
+    return;
+  }
+  hideAllContextMenus();
   const btn = e.target.closest('.group-item[data-group]');
   if (!btn) return;
   setGroupFilter(btn.dataset.group || null);
 });
 
-function setBrandSyncing(on) {
-  els.brandHex?.classList.toggle('is-syncing', Boolean(on));
-}
-
-els.accountList.addEventListener('click', async (e) => {
-  hideAccountContextMenu();
-  const item = e.target.closest('[data-id]');
-  const id = item?.dataset.id;
-  if (!id) return;
-  await setAccountFilter(id);
+els.groupPlatformPicker?.addEventListener('click', (e) => {
+  if (e.target.closest('.group-platform-picker-scrim')) {
+    hideGroupPlatformPicker();
+    return;
+  }
+  const chip = e.target.closest('.hex-icon[data-platform]');
+  if (!chip || chip.disabled) return;
+  const platform = chip.dataset.platform;
+  const group = pendingAddGroup;
+  if (!group || !platform) return;
+  addAccountToGroup(group, platform);
 });
 
-els.accountList.addEventListener('contextmenu', (e) => {
-  const item = e.target.closest('[data-id]');
-  if (!item) return;
+els.groupList?.addEventListener('contextmenu', (e) => {
+  const btn = e.target.closest('.group-item[data-group]');
+  if (!btn) return;
+  const name = btn.dataset.group || '';
+  if (!isEditableGroup(name)) return;
   e.preventDefault();
-  const account = accounts.find((a) => a.id === item.dataset.id);
-  if (!account) return;
-  showAccountContextMenu(account, e.clientX, e.clientY);
+  showGroupContextMenu(name, e.clientX, e.clientY);
 });
 
-els.accountContextMenu?.addEventListener('click', async (e) => {
+els.groupContextMenu?.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-ctx]');
-  const id = contextMenuAccountId;
+  const name = contextMenuGroupName;
   const action = btn?.dataset.ctx;
-  hideAccountContextMenu();
-  if (!id || !action) return;
+  hideGroupContextMenu();
+  if (!name || !action) return;
 
   try {
-    if (action === 'login') {
-      await startLogin(id);
-    } else if (action === 'move') {
-      openMoveGroupDialog(id);
+    if (action === 'rename') {
+      openRenameGroupDialog(name);
     } else if (action === 'delete') {
-      await deleteAccount(id);
+      await deleteProjectGroup(name);
     }
   } catch (err) {
     alert(err.message);
   }
 });
 
-document.addEventListener('pointerdown', (e) => {
-  if (!els.accountContextMenu || els.accountContextMenu.hidden) return;
-  if (els.accountContextMenu.contains(e.target)) return;
+function setBrandSyncing(on) {
+  els.brandHex?.classList.toggle('is-syncing', Boolean(on));
+}
+
+function getAccountMarqueeEl() {
+  let el = document.getElementById('accountMarquee');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'accountMarquee';
+    el.className = 'account-marquee';
+    el.hidden = true;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function hitAccountIdsInRect(box) {
+  const ids = [];
+  for (const item of els.accountList.querySelectorAll('.account-item[data-id]')) {
+    const r = item.getBoundingClientRect();
+    if (box.right < r.left || box.left > r.right || box.bottom < r.top || box.top > r.bottom) {
+      continue;
+    }
+    ids.push(item.dataset.id);
+  }
+  return ids;
+}
+
+function paintAccountSelection() {
+  for (const item of els.accountList.querySelectorAll('.account-item[data-id]')) {
+    item.classList.toggle('active', selectedAccountIds.has(item.dataset.id));
+  }
+}
+
+function updateAccountMarquee(clientX, clientY) {
+  if (!accountPointerSelect?.active) return;
+  const { startX, startY, additive, baseIds } = accountPointerSelect;
+  const left = Math.min(startX, clientX);
+  const top = Math.min(startY, clientY);
+  const width = Math.abs(clientX - startX);
+  const height = Math.abs(clientY - startY);
+  const el = getAccountMarqueeEl();
+  el.hidden = false;
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.style.width = `${width}px`;
+  el.style.height = `${height}px`;
+
+  const hits = hitAccountIdsInRect({
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+  });
+  selectedAccountIds = additive ? new Set([...baseIds, ...hits]) : new Set(hits);
+  selectedAccountId = selectedAccountIds.size
+    ? hits.at(-1) || [...selectedAccountIds].at(-1)
+    : null;
+  paintAccountSelection();
+}
+
+async function endAccountMarquee() {
+  if (!accountPointerSelect) return;
+  const wasActive = accountPointerSelect.active;
+  const pointerId = accountPointerSelect.pointerId;
+  accountPointerSelect = null;
+  try {
+    if (pointerId != null) els.accountList.releasePointerCapture(pointerId);
+  } catch {
+    /* already released */
+  }
+  els.accountList.classList.remove('is-marquee-selecting');
+  getAccountMarqueeEl().hidden = true;
+  if (!wasActive) return;
+  suppressAccountClick = true;
+  if (selectedAccountId) lastAccountClickId = selectedAccountId;
+  renderPlatformFilter();
+  await refreshConversations();
+}
+
+els.accountList.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  if (e.target.closest('button, a, input, textarea, select')) return;
+  accountPointerSelect = {
+    startX: e.clientX,
+    startY: e.clientY,
+    pointerId: e.pointerId,
+    additive: e.ctrlKey || e.metaKey,
+    baseIds: [...selectedAccountIds],
+    active: false,
+  };
+  try {
+    els.accountList.setPointerCapture(e.pointerId);
+  } catch {
+    /* ignore */
+  }
+});
+
+els.accountList.addEventListener('pointermove', (e) => {
+  if (!accountPointerSelect || e.pointerId !== accountPointerSelect.pointerId) return;
+  const dx = e.clientX - accountPointerSelect.startX;
+  const dy = e.clientY - accountPointerSelect.startY;
+  if (!accountPointerSelect.active) {
+    if (Math.hypot(dx, dy) < ACCOUNT_MARQUEE_THRESHOLD) return;
+    accountPointerSelect.active = true;
+    els.accountList.classList.add('is-marquee-selecting');
+  }
+  updateAccountMarquee(e.clientX, e.clientY);
+});
+
+els.accountList.addEventListener('pointerup', (e) => {
+  if (!accountPointerSelect || e.pointerId !== accountPointerSelect.pointerId) return;
+  endAccountMarquee();
+});
+
+els.accountList.addEventListener('pointercancel', (e) => {
+  if (!accountPointerSelect || e.pointerId !== accountPointerSelect.pointerId) return;
+  endAccountMarquee();
+});
+
+els.accountList.addEventListener('click', async (e) => {
+  hideAllContextMenus();
+  if (suppressAccountClick) {
+    suppressAccountClick = false;
+    return;
+  }
+  const item = e.target.closest('[data-id]');
+  const id = item?.dataset.id;
+  if (!id) return;
+  const multi = e.ctrlKey || e.metaKey;
+  const range = e.shiftKey;
+  await setAccountFilter(id, { multi, range });
+});
+
+els.accountList.addEventListener('contextmenu', (e) => {
+  const item = e.target.closest('[data-id]');
+  if (!item) return;
+  e.preventDefault();
+  const id = item.dataset.id;
+  const account = accounts.find((a) => a.id === id);
+  if (!account) return;
+
+  let ids;
+  if (selectedAccountIds.has(id) && selectedAccountIds.size > 0) {
+    ids = getSelectedAccountIds();
+  } else {
+    selectedAccountIds = new Set([id]);
+    selectedAccountId = id;
+    lastAccountClickId = id;
+    renderAccounts();
+    ids = [id];
+  }
+  showAccountContextMenu(ids, e.clientX, e.clientY);
+});
+
+els.accountContextMenu?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-ctx]');
+  const ids = [...contextMenuAccountIds];
+  const action = btn?.dataset.ctx;
   hideAccountContextMenu();
+  if (!ids.length || !action) return;
+
+  try {
+    if (action === 'login') {
+      await startLogin(ids[0]);
+    } else if (action === 'proxy') {
+      openProxyDialog(ids[0]);
+    } else if (action === 'move') {
+      openMoveGroupDialog(ids);
+    } else if (action === 'delete') {
+      await deleteAccounts(ids);
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+els.proxyForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const clear = e.submitter?.value === 'clear';
+  try {
+    await saveAccountProxy({ clear });
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.addEventListener('pointerdown', (e) => {
+  const accountOpen = els.accountContextMenu && !els.accountContextMenu.hidden;
+  const groupOpen = els.groupContextMenu && !els.groupContextMenu.hidden;
+  if (!accountOpen && !groupOpen) return;
+  if (accountOpen && els.accountContextMenu.contains(e.target)) return;
+  if (groupOpen && els.groupContextMenu.contains(e.target)) return;
+  hideAllContextMenus();
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') hideAccountContextMenu();
+  if (e.key === 'Escape') hideAllContextMenus();
 });
 
-window.addEventListener('blur', hideAccountContextMenu);
-window.addEventListener('resize', hideAccountContextMenu);
-window.addEventListener('scroll', hideAccountContextMenu, true);
+window.addEventListener('blur', hideAllContextMenus);
+window.addEventListener('resize', hideAllContextMenus);
+window.addEventListener('scroll', hideAllContextMenus, true);
 
 document.querySelector('.brand-hex')?.addEventListener('click', (e) => {
   const btn = e.target.closest('.hex-icon[data-platform]');
@@ -918,7 +1911,7 @@ async function syncAllAccounts() {
   setSyncButtonsBusy(true);
   setBrandSyncing(true);
   const started = Date.now();
-  if (els.syncHint) els.syncHint.textContent = '正在同步全部账号（每个约 5–15 秒）…';
+  if (els.syncHint) els.syncHint.textContent = '正在同步全部账号（每个约 5–15 秒）';
   const active = accounts.filter((a) => a.status === 'active');
   const needsEmbed = active.some(accountNeedsHeadedBrowser);
   const run = async (windowBounds) => {
@@ -934,7 +1927,7 @@ async function syncAllAccounts() {
   };
   try {
     if (needsEmbed) {
-      await withSyncEmbed('正在同步全部账号，请稍候…', run);
+      await withSyncEmbed('正在同步全部账号，请稍候', run);
     } else {
       await run(null);
     }
@@ -978,7 +1971,7 @@ els.replyForm.addEventListener('submit', async (e) => {
   }
 });
 
-els.loginDialog.addEventListener('close', () => {
+els.btnCancelLogin?.addEventListener('click', () => {
   cancelLogin();
 });
 

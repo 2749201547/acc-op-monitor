@@ -57,11 +57,24 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, sent_at);
 `);
 
-// 旧库补 platform 列
+// 旧库补列
 try {
   const cols = db.prepare('PRAGMA table_info(accounts)').all();
-  if (!cols.some((c) => c.name === 'platform')) {
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has('platform')) {
     db.exec(`ALTER TABLE accounts ADD COLUMN platform TEXT NOT NULL DEFAULT 'tiktok'`);
+  }
+  if (!names.has('proxy_server')) {
+    db.exec(`ALTER TABLE accounts ADD COLUMN proxy_server TEXT`);
+  }
+  if (!names.has('proxy_username')) {
+    db.exec(`ALTER TABLE accounts ADD COLUMN proxy_username TEXT`);
+  }
+  if (!names.has('proxy_password')) {
+    db.exec(`ALTER TABLE accounts ADD COLUMN proxy_password TEXT`);
+  }
+  if (!names.has('proxy_region')) {
+    db.exec(`ALTER TABLE accounts ADD COLUMN proxy_region TEXT`);
   }
 } catch {
   /* ignore */

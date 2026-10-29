@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "AOM";
+  src: url("/AOM.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #f3f4f6;
   --panel: #ffffff;
@@ -11,6 +19,7 @@
   --warn: #d97706;
   --radius: 14px;
   --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-project: "AOM", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 * {
@@ -75,7 +84,15 @@ input {
 .col-accounts {
   background: #f7f8fa;
   gap: 12px;
+}
+
+.col-groups {
   padding: 10px 12px 16px;
+}
+
+.col-accounts {
+  /* 与消息/会话标题行顶对齐 */
+  padding: 0 12px 16px;
 }
 
 .col-chat {
@@ -103,11 +120,20 @@ input {
 .sync-embed-head {
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+}
+
+.sync-embed-head-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .sync-embed-head h2 {
@@ -122,8 +148,22 @@ input {
   line-height: 1.4;
 }
 
+.sync-embed-cancel {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.sync-embed-cancel[hidden] {
+  display: none !important;
+}
+
 .sync-embed-slot {
   border: 1px dashed #c5cad3;
+}
+
+.sync-embed-overlay .sync-embed-slot img {
+  max-width: 240px;
+  max-height: 240px;
 }
 
 .brand {
@@ -415,6 +455,12 @@ input {
   flex-shrink: 0;
 }
 
+.panel-head-groups {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+
 .icon-btn {
   display: inline-grid;
   place-items: center;
@@ -457,7 +503,25 @@ input {
 .inbox-head h2,
 .chat-head h2 {
   margin: 0;
-  font-size: 0.95rem;
+  padding: 0;
+  font-family: var(--font-project);
+  font-size: 1.35rem;
+  font-weight: 400;
+  line-height: 36px;
+  height: 36px;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+/* 账号 / 消息 / 选择会话 标题行高度对齐 */
+.col-accounts .panel-head {
+  min-height: 52px;
+  margin-bottom: 8px;
+  padding: 8px 0;
+  box-sizing: border-box;
 }
 
 .account-list,
@@ -482,6 +546,164 @@ input {
 
 .group-list {
   padding-left: 10px;
+}
+
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.group-row .group-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-row-add,
+.group-row-add-spacer {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.group-add-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.08));
+  transition: transform 0.15s ease, filter 0.15s ease, opacity 0.18s ease;
+}
+
+.group-add-btn .brand-add-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.group-add-btn:hover {
+  transform: scale(1.08);
+  filter: drop-shadow(0 2px 6px rgba(47, 123, 255, 0.28));
+}
+
+.group-add-btn:focus-visible {
+  outline: 2px solid #2f7bff;
+  outline-offset: 2px;
+}
+
+.group-add-btn:active {
+  transform: scale(0.96);
+}
+
+.group-add-btn:disabled,
+.group-add-btn.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(0.35);
+}
+
+.group-add-btn:disabled:hover,
+.group-add-btn.is-disabled:hover {
+  transform: none;
+  filter: grayscale(0.35);
+}
+
+.group-add-btn.is-picking {
+  transform: scale(1.06);
+  filter: drop-shadow(0 2px 8px rgba(47, 123, 255, 0.32));
+  z-index: 2;
+}
+
+/* 分组加号旁环形选平台 */
+.group-platform-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.group-platform-picker[hidden] {
+  display: none !important;
+}
+
+.group-platform-picker-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.group-platform-picker-orbit {
+  --hex-radius: 48px;
+  --icon-size: 28px;
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.group-platform-picker-orbit .hex-icon {
+  pointer-events: auto;
+  opacity: 0;
+  transform: rotate(calc(var(--i) * 60deg)) translateY(0)
+    rotate(calc(var(--i) * -60deg)) scale(0.6);
+  transition:
+    transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.18s ease,
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+  transition-delay: calc((5 - var(--i)) * 24ms);
+}
+
+.group-platform-picker.is-open .group-platform-picker-orbit .hex-icon {
+  opacity: 1;
+  transform: rotate(calc(var(--i) * 60deg)) translateY(calc(var(--hex-radius) * -1))
+    rotate(calc(var(--i) * -60deg)) scale(1);
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1.2, 0.36, 1),
+    opacity 0.2s ease,
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+  transition-delay: calc(var(--i) * 28ms);
+}
+
+.group-platform-picker.is-open .group-platform-picker-orbit .hex-icon:hover:not(:disabled) {
+  transform: rotate(calc(var(--i) * 60deg)) translateY(calc(var(--hex-radius) * -1))
+    rotate(calc(var(--i) * -60deg)) scale(1.14);
+  transition-delay: 0ms;
+}
+
+.group-platform-picker.is-closing {
+  pointer-events: none;
+}
+
+.group-platform-picker-orbit .hex-icon:disabled,
+.group-platform-picker-orbit .hex-icon.is-disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.45);
+}
+
+.group-platform-picker.is-open .group-platform-picker-orbit .hex-icon:disabled,
+.group-platform-picker.is-open .group-platform-picker-orbit .hex-icon.is-disabled {
+  opacity: 0.38;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-platform-picker-orbit .hex-icon,
+  .group-platform-picker.is-open .group-platform-picker-orbit .hex-icon {
+    transition: none;
+    transition-delay: 0ms;
+  }
 }
 
 /* 默认隐藏滚动条，悬停 / 滚动时再显示 */
@@ -515,8 +737,9 @@ input {
 }
 
 .group-item {
-  width: auto;
+  width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
   text-align: left;
   border: 1px solid transparent;
   background: var(--panel);
@@ -524,9 +747,9 @@ input {
   border-radius: 10px;
   padding: 8px 10px 8px 12px;
   cursor: pointer;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   gap: 8px;
   font: inherit;
 }
@@ -543,8 +766,14 @@ input {
 }
 
 .group-item-name {
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-family: var(--font-project);
+  font-size: 1.4rem;
+  font-weight: 400; /* AOM 仅 Regular，700 会假粗体发糊 */
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
   min-width: 0;
   flex: 0 1 auto;
   overflow: hidden;
@@ -615,6 +844,20 @@ input {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.account-list.is-marquee-selecting {
+  user-select: none;
+  cursor: crosshair;
+}
+
+.account-marquee {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px solid rgba(238, 29, 82, 0.55);
+  background: rgba(238, 29, 82, 0.12);
+}
+
 .account-body {
   min-width: 0;
   display: flex;
@@ -652,6 +895,17 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.proxy-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: #1d4ed8;
+  background: rgba(47, 123, 255, 0.1);
+  border: 1px solid rgba(47, 123, 255, 0.28);
 }
 
 .account-item .meta {
@@ -743,9 +997,11 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 18px;
+  min-height: 52px;
+  padding: 8px 18px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .chat-head {
@@ -756,6 +1012,17 @@ input {
     18px,
     calc(100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 100vw) + 12px)
   );
+}
+
+.chat-head > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.chat-head .muted:empty {
+  display: none;
 }
 
 .conversation-list {
@@ -917,33 +1184,197 @@ dialog::backdrop {
 }
 
 /* 锚定在按钮旁的轻量弹层 */
-#groupDialog.dialog-anchored {
+#groupDialog.dialog-anchored,
+#confirmDialog.dialog-anchored {
   margin: 0;
   position: fixed;
   width: min(300px, calc(100vw - 24px));
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
 }
 
-#groupDialog.dialog-anchored::backdrop {
-  background: rgba(15, 23, 42, 0.12);
+#groupDialog.dialog-anchored[open],
+#confirmDialog.dialog-anchored[open] {
+  animation: group-dialog-in 0.18s ease-out;
+}
+
+#groupDialog.dialog-anchored[open].is-closing,
+#confirmDialog.dialog-anchored[open].is-closing {
+  animation: group-dialog-out 0.18s ease-in forwards;
+  pointer-events: none;
+}
+
+#groupDialog.dialog-anchored::backdrop,
+#confirmDialog.dialog-anchored::backdrop {
+  background: rgba(15, 23, 42, 0.2);
+  animation: group-backdrop-in 0.18s ease-out;
+}
+
+#groupDialog.dialog-anchored.is-closing::backdrop,
+#confirmDialog.dialog-anchored.is-closing::backdrop {
+  animation: group-backdrop-out 0.18s ease-in forwards;
+}
+
+#groupDialog.dialog-anchored .dialog-card {
+  padding: 18px 18px 16px;
+}
+
+#groupDialog.dialog-anchored .dialog-card h3 {
+  font-family: var(--font-project);
+  font-size: 1.35rem;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+#groupDialog.dialog-anchored .dialog-card > .muted {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
+#groupDialog.dialog-anchored .dialog-picker {
+  margin-top: 14px;
+}
+
+#groupDialog.dialog-anchored .dialog-picker-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+#groupDialog.dialog-anchored .platform-chips {
+  gap: 8px;
+}
+
+#groupDialog.dialog-anchored .platform-chips .group-chip {
+  flex: 1 1 calc(50% - 8px);
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+#groupDialog.dialog-anchored .platform-chips .group-chip:hover:not(:disabled) {
+  border-color: #2f7bff;
+}
+
+#groupDialog.dialog-anchored .platform-chips .group-chip.active {
+  border-color: #2f7bff;
+  color: #1d4ed8;
+  background: rgba(47, 123, 255, 0.08);
+}
+
+#groupDialog.dialog-anchored .platform-chips .group-chip img {
+  width: 18px;
+  height: 18px;
+}
+
+#groupDialog.dialog-anchored .field {
+  margin: 14px 0 0;
+}
+
+#groupDialog.dialog-anchored .field input:focus {
+  outline: 2px solid rgba(47, 123, 255, 0.28);
+  border-color: #2f7bff;
+}
+
+#groupDialog.dialog-anchored .dialog-actions {
+  margin-top: 16px;
+}
+
+#groupDialog.dialog-anchored .dialog-actions-center {
+  justify-content: center;
+}
+
+#groupDialog.dialog-anchored .dialog-card > .muted[hidden],
+#groupDialog .field[hidden],
+#groupDialog .dialog-picker[hidden] {
+  display: none !important;
+}
+
+#groupDialog.dialog-anchored .btn {
+  min-width: 120px;
+  border-radius: 10px;
+  padding: 9px 18px;
+}
+
+#groupDialog.dialog-anchored .btn-primary {
+  background: linear-gradient(135deg, #2f7bff, #1ec8b0);
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(47, 123, 255, 0.22);
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+#groupDialog.dialog-anchored .btn-primary:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 8px 18px rgba(47, 123, 255, 0.32);
+  transform: translateY(-1px);
+}
+
+#groupDialog.dialog-anchored .btn-primary:active {
+  filter: brightness(0.96);
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(47, 123, 255, 0.2);
+}
+
+@keyframes group-dialog-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes group-dialog-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes group-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes group-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #groupDialog.dialog-anchored[open],
+  #groupDialog.dialog-anchored[open]::backdrop,
+  #groupDialog.dialog-anchored[open].is-closing,
+  #groupDialog.dialog-anchored.is-closing::backdrop,
+  #confirmDialog.dialog-anchored[open],
+  #confirmDialog.dialog-anchored[open]::backdrop,
+  #confirmDialog.dialog-anchored[open].is-closing,
+  #confirmDialog.dialog-anchored.is-closing::backdrop {
+    animation: none;
+  }
 }
 
 /* 登录对话框：不要整屏黑遮罩，背后界面保持可见 */
-#loginDialog::backdrop {
-  background: transparent;
-}
-
 .dialog-card {
   margin: 0;
   padding: 20px;
-}
-
-#loginDialog {
-  width: min(780px, 94vw);
-}
-
-.dialog-card-embed {
-  width: 100%;
 }
 
 .dialog-card h3 {
@@ -957,14 +1388,9 @@ dialog::backdrop {
   line-height: 1.5;
 }
 
-.browser-embed-slot,
-.qr-wrap {
-  margin: 16px 0;
+.browser-embed-slot {
   display: grid;
   place-items: center;
-  width: 100%;
-  height: 480px;
-  min-height: 480px;
   background: #fff;
   border-radius: 12px;
   padding: 12px;
@@ -973,7 +1399,7 @@ dialog::backdrop {
   overflow: hidden;
 }
 
-/* 会话区同步槽：铺满剩余高度；width 勿用 100%+左右 margin，否则右边虚线被裁切 */
+/* 会话区槽：铺满剩余高度；width 勿用 100%+左右 margin，否则右边虚线被裁切 */
 .sync-embed-overlay .sync-embed-slot {
   margin: 12px;
   width: auto;
@@ -982,11 +1408,6 @@ dialog::backdrop {
   min-height: 0;
   flex: 1;
   align-self: stretch;
-}
-
-.qr-wrap img {
-  max-width: 240px;
-  max-height: 240px;
 }
 
 .qr-placeholder {
@@ -1010,7 +1431,8 @@ dialog::backdrop {
   color: var(--muted);
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--line);
@@ -1021,16 +1443,28 @@ dialog::backdrop {
   font: inherit;
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   outline: 1px solid var(--accent, #e85d4c);
   border-color: transparent;
+}
+
+.dialog-picker {
+  margin: 12px 0 0;
+}
+
+.dialog-picker-label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 8px;
 }
 
 .group-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 14px 0 4px;
+  margin: 0;
   min-height: 12px;
 }
 
@@ -1054,9 +1488,30 @@ dialog::backdrop {
   color: var(--accent, #e85d4c);
 }
 
+.group-chip:disabled,
+.group-chip.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+
 .group-chip-empty {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.platform-chips .group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+}
+
+.platform-chips .group-chip img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .dialog-actions-split {
@@ -1068,14 +1523,57 @@ dialog::backdrop {
   padding: 22px 22px 18px;
 }
 
+#confirmDialog.dialog-anchored .dialog-card {
+  padding: 18px 18px 16px;
+}
+
+#confirmDialog.dialog-anchored .dialog-card h3 {
+  font-family: var(--font-project);
+  font-size: 1.35rem;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
 #confirmDialogMessage {
   margin: 8px 0 22px;
-  line-height: 1.5;
+  line-height: 1.65;
   font-size: 0.95rem;
 }
 
-#confirmDialog .dialog-actions-split {
-  justify-content: flex-end;
+#confirmDialogMessage strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+#confirmDialog.dialog-anchored #confirmDialogMessage {
+  margin: 8px 0 16px;
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+#confirmDialog .dialog-actions-center {
+  justify-content: center;
+}
+
+#confirmDialog .btn-primary {
+  min-width: 132px;
+  background: linear-gradient(135deg, #e11d48, #f43f5e);
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(225, 29, 72, 0.28);
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+#confirmDialog .btn-primary:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 8px 18px rgba(225, 29, 72, 0.36);
+  transform: translateY(-1px);
+}
+
+#confirmDialog .btn-primary:active {
+  filter: brightness(0.96);
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(225, 29, 72, 0.22);
 }
 
 .context-menu {

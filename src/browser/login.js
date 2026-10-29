@@ -4,6 +4,7 @@ import {
   isLoggedIn,
   readProfile,
   reapplyContextWindow,
+  setContextWindowBounds,
 } from './manager.js';
 import { getPlatform, normalizePlatform } from './platforms/index.js';
 
@@ -245,6 +246,16 @@ export async function cancelLogin(accountId) {
   }
   loginSessions.delete(accountId);
   await closeContext(accountId);
+}
+
+/** Re-measure from UI and re-dock Chrome while login is in progress. */
+export async function updateLoginWindowBounds(accountId, windowBounds) {
+  const session = loginSessions.get(accountId);
+  if (!session) return { ok: false, reason: 'no_session' };
+  const bounds = windowBounds || null;
+  setSession(accountId, { windowBounds: bounds });
+  const ok = await setContextWindowBounds(accountId, bounds);
+  return { ok };
 }
 
 async function captureLoginView(page) {

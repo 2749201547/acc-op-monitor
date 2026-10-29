@@ -1,6 +1,11 @@
 import { v4 as uuid } from 'uuid';
 import db, { profilePath } from '../db.js';
-import { startQrLogin, getLoginStatus, cancelLogin } from '../browser/login.js';
+import {
+  startQrLogin,
+  getLoginStatus,
+  cancelLogin,
+  updateLoginWindowBounds,
+} from '../browser/login.js';
 import { closeContext } from '../browser/manager.js';
 import { normalizePlatform, PLATFORMS } from '../browser/platforms/index.js';
 import fs from 'fs';
@@ -9,9 +14,35 @@ function now() {
   return new Date().toISOString();
 }
 
+export const PROXY_REGIONS = ['美国', '马来', '泰国', '新加坡', '菲律宾'];
+
 const ACCOUNT_SELECT = `SELECT id, label, platform, username, display_name as displayName, avatar_url as avatarUrl,
-              status, last_sync_at as lastSyncAt, created_at as createdAt, updated_at as updatedAt
+              status, last_sync_at as lastSyncAt, created_at as createdAt, updated_at as updatedAt,
+              proxy_server as proxyServer, proxy_username as proxyUsername, proxy_password as proxyPassword,
+              proxy_region as proxyRegion
        FROM accounts`;
+
+/**
+ * @param {{ server?: string|null, username?: string|null, password?: string|null, region?: string|null }} raw
+ */
+export function normalizeProxyConfig(raw = {}) {
+  const regionRaw = String(raw.region ?? '').trim();
+  const region = regionRaw && PROXY_REGIONS.includes(regionRaw) ? regionRaw : null;
+  const server = String(raw.server ?? '').trim();
+  if (!server) {
+    return { server: null, username: null, password: null, region };
+  }
+  if (!/^(https?|socks5):\/\//i.test(server)) {
+    throw new Error('代理地址须以 http://、https:// 或 socks5:// 开头');
+  }
+  const username = String(raw.username ?? '').trim() || null;
+  const passwordRaw = raw.password;
+  const password =
+    passwordRaw === undefined || passwordRaw === null || String(passwordRaw) === ''
+      ? null
+      : String(passwordRaw);
+  return { server, username, password, region };
+}
 
 export function listAccounts() {
   return db.prepare(`${ACCOUNT_SELECT} ORDER BY created_at DESC`).all();
@@ -53,6 +84,20 @@ export function updateAccount(id, fields) {
   return getAccount(id);
 }
 
+/** Save per-account proxy and drop any open browser so next launch picks it up. */
+export async function updateAccountProxy(id, raw) {
+  const a = getAccount(id);
+  if (!a) throw new Error('账号不存在');
+  const proxy = normalizeProxyConfig(raw);
+  // 无代理地址时不保留地区备注，避免列表误显示
+  const region = proxy.server ? proxy.region : null;
+  db.prepare(
+    `UPDATE accounts SET proxy_server=?, proxy_username=?, proxy_password=?, proxy_region=?, updated_at=? WHERE id=?`
+  ).run(proxy.server, proxy.username, proxy.password, region, now(), id);
+  await closeContext(id);
+  return getAccount(id);
+}
+
 export function beginLogin(accountId, windowBounds = null) {
   const a = getAccount(accountId);
   if (!a) throw new Error('账号不存在');
@@ -79,6 +124,12 @@ export async function pollLogin(accountId) {
     updateAccount(accountId, { status: result.status === 'error' ? 'pending' : 'expired' });
   }
   return { ...result, account: getAccount(accountId) };
+}
+
+export async function updateLoginBounds(accountId, windowBounds) {
+  const a = getAccount(accountId);
+  if (!a) throw new Error('账号不存在');
+  return updateLoginWindowBounds(accountId, windowBounds);
 }
 
 export async function stopLogin(accountId) {

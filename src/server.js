@@ -7,9 +7,11 @@ import {
   beginLogin,
   pollLogin,
   stopLogin,
+  updateLoginBounds,
   removeAccount,
   getAccount,
   updateAccount,
+  updateAccountProxy,
 } from './services/accounts.js';
 import {
   listConversations,
@@ -78,6 +80,21 @@ app.patch('/api/accounts/:id', (req, res) => {
   res.json(updated);
 });
 
+app.patch('/api/accounts/:id/proxy', async (req, res) => {
+  try {
+    const updated = await updateAccountProxy(req.params.id, {
+      server: req.body?.server,
+      username: req.body?.username,
+      password: req.body?.password,
+      region: req.body?.region,
+    });
+    res.json(updated);
+  } catch (e) {
+    const notFound = e.message === '账号不存在';
+    res.status(notFound ? 404 : 400).json({ error: e.message });
+  }
+});
+
 app.post('/api/accounts/:id/login', async (req, res) => {
   try {
     const result = await beginLogin(req.params.id, req.body?.windowBounds || null);
@@ -99,6 +116,15 @@ app.get('/api/accounts/:id/login/status', async (req, res) => {
 app.post('/api/accounts/:id/login/cancel', async (req, res) => {
   await stopLogin(req.params.id);
   res.json({ ok: true });
+});
+
+app.post('/api/accounts/:id/login/bounds', async (req, res) => {
+  try {
+    const result = await updateLoginBounds(req.params.id, req.body?.windowBounds || null);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 app.delete('/api/accounts/:id', async (req, res) => {

@@ -90,8 +90,37 @@
         </header>
 
         <section class="panel panel-fill">
-          <div class="panel-head">
-            <h2>分组</h2>
+          <div class="panel-head panel-head-groups">
+            <h2>项目分组</h2>
+            <button
+              type="button"
+              class="group-add-btn"
+              id="btnGroupAdd"
+              aria-label="添加项目分组"
+              title="添加项目分组"
+            >
+              <svg class="brand-add-svg" viewBox="0 0 512 512" aria-hidden="true" focusable="false">
+                <defs>
+                  <linearGradient id="aomGroupAddOuter" x1="56" y1="256" x2="456" y2="256" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#2F7BFF" />
+                    <stop offset="1" stop-color="#1EC8B0" />
+                  </linearGradient>
+                  <linearGradient id="aomGroupAddInner" x1="56" y1="256" x2="456" y2="256" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#1EC8B0" />
+                    <stop offset="1" stop-color="#2F7BFF" />
+                  </linearGradient>
+                </defs>
+                <path
+                  fill="url(#aomGroupAddOuter)"
+                  fill-rule="evenodd"
+                  d="M256 56c110.5 0 200 89.5 200 200s-89.5 200-200 200S56 366.5 56 256 145.5 56 256 56zm0 52c-81.7 0-148 66.3-148 148s66.3 148 148 148 148-66.3 148-148-66.3-148-148-148z"
+                />
+                <path
+                  fill="url(#aomGroupAddInner)"
+                  d="M351.604 234.755h-63.736c-5.867 0-10.623-4.756-10.623-10.623v-63.736c0-11.714-9.531-21.245-21.245-21.245s-21.245 9.531-21.245 21.245v63.736c0 5.867-4.756 10.623-10.623 10.623h-63.736c-11.714 0-21.245 9.531-21.245 21.245s9.531 21.245 21.245 21.245h63.736c5.867 0 10.623 4.756 10.623 10.623v63.736c0 11.714 9.531 21.245 21.245 21.245s21.245-9.531 21.245-21.245v-63.736c0-5.867 4.756-10.623 10.623-10.623h63.736c11.714 0 21.245-9.531 21.245-21.245s-9.531-21.245-21.245-21.245z"
+                />
+              </svg>
+            </button>
           </div>
           <ul id="groupList" class="group-list autohide-scroll"></ul>
         </section>
@@ -143,14 +172,20 @@
           <textarea id="replyInput" rows="2" placeholder="输入回复…" required></textarea>
           <button class="btn btn-primary" type="submit">发送</button>
         </form>
-        <!-- 同步时遮住会话区（无黑屏遮罩），Chrome 贴合下方槽位 -->
+        <!-- 同步 / 登录：遮住会话区（无黑屏遮罩），Chrome 贴合下方槽位 -->
         <div id="syncEmbedOverlay" class="sync-embed-overlay" hidden>
           <header class="sync-embed-head">
-            <h2 id="syncEmbedTitle">正在同步</h2>
-            <p id="syncEmbedStatus" class="muted"></p>
+            <div class="sync-embed-head-text">
+              <h2 id="syncEmbedTitle">正在同步</h2>
+              <p id="syncEmbedStatus" class="muted"></p>
+            </div>
+            <button type="button" id="btnCancelLogin" class="btn sync-embed-cancel" hidden>
+              取消
+            </button>
           </header>
           <div class="browser-embed-slot sync-embed-slot" id="syncEmbedSlot">
-            <div class="qr-placeholder">浏览器将贴合此区域</div>
+            <div id="qrPlaceholder" class="qr-placeholder">浏览器将贴合此区域</div>
+            <img id="qrImage" alt="登录预览" hidden />
           </div>
         </div>
       </section>
@@ -158,11 +193,18 @@
 
     <dialog id="groupDialog">
       <form method="dialog" class="dialog-card" id="groupForm">
-        <h3>选择分组</h3>
+        <h3 id="groupDialogTitle">选择分组</h3>
         <p id="groupDialogHint" class="muted">把账号归到分组，方便管理</p>
-        <div id="groupChips" class="group-chips"></div>
-        <label class="field">
-          <span>分组名称</span>
+        <div id="platformPicker" class="dialog-picker" hidden>
+          <span class="dialog-picker-label">平台</span>
+          <div id="platformChips" class="group-chips platform-chips"></div>
+        </div>
+        <div id="groupPicker" class="dialog-picker">
+          <span class="dialog-picker-label">分组</span>
+          <div id="groupChips" class="group-chips"></div>
+        </div>
+        <label class="field" id="groupInputField">
+          <span id="groupInputLabel">或输入新分组</span>
           <input
             id="groupInput"
             name="group"
@@ -172,25 +214,10 @@
             autocomplete="off"
           />
         </label>
-        <div class="dialog-actions dialog-actions-split">
-          <button class="btn" id="btnCancelGroup" type="button">取消</button>
+        <div class="dialog-actions dialog-actions-center">
           <button class="btn btn-primary" id="btnConfirmGroup" value="confirm" type="submit">
             确定
           </button>
-        </div>
-      </form>
-    </dialog>
-
-    <dialog id="loginDialog">
-      <form method="dialog" class="dialog-card dialog-card-embed">
-        <h3 id="loginDialogTitle">扫码登录</h3>
-        <p id="loginStatusText" class="muted">请使用 TikTok App 扫描弹出的浏览器窗口</p>
-        <div class="browser-embed-slot qr-wrap" id="loginEmbedSlot">
-          <div id="qrPlaceholder" class="qr-placeholder">浏览器启动后会弹出扫码窗口</div>
-          <img id="qrImage" alt="登录预览" hidden />
-        </div>
-        <div class="dialog-actions">
-          <button id="btnCancelLogin" class="btn" value="cancel" type="submit">取消</button>
         </div>
       </form>
     </dialog>
@@ -199,19 +226,80 @@
       <form method="dialog" class="dialog-card">
         <h3 id="confirmDialogTitle">确认删除</h3>
         <p id="confirmDialogMessage" class="muted">确定删除该账号及其本地会话？</p>
+        <div class="dialog-actions dialog-actions-center">
+          <button class="btn btn-primary" id="btnOkConfirm" value="confirm" type="submit">确定删除</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="proxyDialog">
+      <form method="dialog" class="dialog-card" id="proxyForm">
+        <h3>代理设置</h3>
+        <p class="muted">
+          仅对该账号浏览器生效，不受系统代理影响。Clash 本地端口例：socks5://127.0.0.1:11002
+        </p>
+        <label class="field">
+          <span>地区备注</span>
+          <select id="proxyRegion" name="region">
+            <option value="">不标注</option>
+            <option value="美国">美国</option>
+            <option value="马来">马来</option>
+            <option value="泰国">泰国</option>
+            <option value="新加坡">新加坡</option>
+            <option value="菲律宾">菲律宾</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>代理地址</span>
+          <input
+            id="proxyServer"
+            name="server"
+            type="text"
+            maxlength="200"
+            placeholder="socks5://127.0.0.1:11002"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+        <label class="field">
+          <span>用户名（可选）</span>
+          <input id="proxyUsername" name="username" type="text" maxlength="120" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>密码（可选）</span>
+          <input id="proxyPassword" name="password" type="password" maxlength="120" autocomplete="new-password" />
+        </label>
         <div class="dialog-actions dialog-actions-split">
-          <button class="btn" id="btnCancelConfirm" value="cancel" type="submit">取消</button>
-          <button class="btn btn-primary" id="btnOkConfirm" value="confirm" type="submit">确定</button>
+          <button type="submit" class="btn" id="btnClearProxy" value="clear">清除</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveProxy" value="save">保存</button>
         </div>
       </form>
     </dialog>
 
     <div id="accountContextMenu" class="context-menu" hidden role="menu">
       <button type="button" class="context-menu-item" data-ctx="login" role="menuitem">登录</button>
+      <button type="button" class="context-menu-item" data-ctx="proxy" role="menuitem">代理设置</button>
       <button type="button" class="context-menu-item" data-ctx="move" role="menuitem">切换分组</button>
       <button type="button" class="context-menu-item context-menu-danger" data-ctx="delete" role="menuitem">
         删除
       </button>
+    </div>
+
+    <div id="groupContextMenu" class="context-menu" hidden role="menu">
+      <button type="button" class="context-menu-item" data-ctx="rename" role="menuitem">重命名</button>
+      <button type="button" class="context-menu-item context-menu-danger" data-ctx="delete" role="menuitem">
+        删除
+      </button>
+    </div>
+
+    <div id="groupPlatformPicker" class="group-platform-picker" hidden>
+      <button type="button" class="group-platform-picker-scrim" aria-label="关闭平台选择"></button>
+      <div
+        id="groupPlatformOrbit"
+        class="group-platform-picker-orbit"
+        role="menu"
+        aria-label="选择平台"
+      ></div>
     </div>
 
     <script src="/app.js" type="module"></script>
